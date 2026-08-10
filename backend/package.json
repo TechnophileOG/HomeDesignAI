@@ -1,0 +1,24 @@
+{
+  "name": "katalogit-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "KatalogitAI API — Cloud Run (Node/Express). Catalogue, credit ledger, async jobs.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "smoke": "node test/smoke.mjs",
+    "test": "node test/templates.test.mjs && node test/fallback.test.mjs && node test/export.test.mjs"
+  },
+  "dependencies": {
+    "@google-cloud/firestore": "^7.11.0",
+    "@google-cloud/storage": "^7.14.0",
+    "@google-cloud/tasks": "^6.3.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "google-auth-library": "^9.15.0",
+    "helmet": "^8.0.0"
+  }
+}

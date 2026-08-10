@@ -1,0 +1,79 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // Store owner = the user who owns the store
+    function isStoreOwner(storeId) {
+      return signedIn() && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerUid == request.auth.uid;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.role == 'admin';
+    }
+
+    // ── users ────────────────────────────────────────────────
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      // users only self-created via backend trigger; clients update only
+      // non-sensitive own fields
+      allow create: if isOwner(userId);
+      allow update, delete: if isOwner(userId) && request.resource.data.diff(resource.data).affectedKeys()
+                              .hasOnly(['displayName', 'phone', 'email', 'preferences']);
+    }
+
+    // ── stores ──────────────────────────────────────────────
+    match /stores/{storeId} {
+      allow read: if isStoreOwner(storeId) || isAdmin();
+      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
+      // Owners may edit profile fields ONLY. plan/status/credits/aiFeatures
+      // are server-managed — clients must never self-upgrade their plan.
+      allow update: if isStoreOwner(storeId)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['name','city','storeType','categories','scale',
+                       'salesChannel','yearsInBusiness','inventoryTurnover',
+                       'hasInventorySystem','orderValue','brandStyle']);
+      allow delete: if false; // soft-delete only, via backend
+
+      // ── products ──────────────────────────────────────────
+      match /products/{productId} {
+        allow read: if isStoreOwner(storeId) || isAdmin();
+        allow create, update: if isStoreOwner(storeId);
+        allow delete: if isStoreOwner(storeId);
+      }
+
+      // ── jobs (async AI pipeline) ──────────────────────────
+      match /jobs/{jobId} {
+        allow read: if isStoreOwner(storeId) || isAdmin();
+        // Jobs are created/updated ONLY by the API + worker (Admin SDK
+        // bypasses these rules). Clients must NOT write jobs directly —
+        // that would bypass credit reservation and queue limits.
+        allow create, update, delete: if false;
+      }
+
+      // ── notifications ─────────────────────────────────────
+      match /notifications/{nid} {
+        allow read, update: if isStoreOwner(storeId);
+        allow create, delete: if false; // backend only
+      }
+    }
+
+    // Server-only collections — no direct client access
+    match /admin/{doc=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // Everything else denied by default
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

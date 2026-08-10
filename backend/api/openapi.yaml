@@ -1,0 +1,345 @@
+openapi: 3.1.0
+info:
+  title: KatalogitAI API
+  version: 1.0.0
+  description: >
+    Backend for KatalogitAI — AI product photoshoots for fashion vendors.
+    All endpoints (except webhooks) require `Authorization: Bearer <Firebase ID token>`.
+    The credit ledger lives in Cloud SQL; catalogue lives in Firestore.
+servers:
+  - url: /api/v1
+    description: Same-origin via Firebase Hosting rewrite to Cloud Run
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    ApiResponse:
+      type: object
+      properties:
+        ok: { type: boolean, example: true }
+        data: { type: object }
+      required: [ok]
+    ApiError:
+      type: object
+      properties:
+        ok: { type: boolean, enum: [false] }
+        error:
+          type: object
+          properties:
+            code: { type: string, example: INSUFFICIENT_CREDITS }
+            message: { type: string }
+    Store:
+      type: object
+      properties:
+        id: { type: string }
+        ownerUid: { type: string }
+        name: { type: string }
+        city: { type: string }
+        categories: { type: array, items: { type: string } }
+        scale: { type: string, enum: [starter, small, growing, large] }
+        aiFeatures: { type: array, items: { type: string } }
+        plan: { type: string, enum: [free, pro, business] }
+        status: { type: string, enum: [active, suspended] }
+    Product:
+      type: object
+      properties:
+        id: { type: string }
+        title: { type: string }
+        category: { type: string }
+        price: { type: string }
+        qty: { type: integer }
+        flatLay: { $ref: '#/components/schemas/PhotoRef' }
+        aiResults: { type: array, items: { $ref: '#/components/schemas/PhotoRef' } }
+        status: { type: string, enum: [pending_approve, pending_retake, live] }
+    PhotoRef:
+      type: object
+      properties:
+        path: { type: string, example: stores/store1/products/p1/front.jpg }
+        contentType: { type: string }
+        size: { type: integer }
+    UploadUrlRequest:
+      type: object
+      required: [fileName, contentType, purpose]
+      properties:
+        fileName: { type: string }
+        contentType: { type: string, enum: [image/jpeg, image/png, image/webp] }
+        purpose: { type: string, enum: [flat_lay, ai_result] }
+    UploadUrlResponse:
+      type: object
+      properties:
+        uploadUrl: { type: string, description: V4 signed PUT URL, 15-min TTL }
+        objectPath: { type: string }
+    Job:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string, enum: [model_shoot, regen_shot, full_regen, retake] }
+        productId: { type: string }
+        status: { type: string, enum: [queued, processing, done, failed, refunded] }
+        creditsReserved: { type: number }
+        outputPaths: { type: array, items: { type: string } }
+        errorCode: { type: string, nullable: true }
+    JobCreateRequest:
+      type: object
+      required: [type, productId]
+      properties:
+        type: { type: string, enum: [model_shoot, regen_shot, full_regen, retake] }
+        productId: { type: string }
+    CreditBalance:
+      type: object
+      properties:
+        balance: { type: number, example: 42.0 }
+        plan: { type: string, enum: [free, pro, business] }
+        entitlements: { type: array, items: { type: string } }
+        pricing:
+          type: object
+          additionalProperties: { type: number }
+    LedgerEntry:
+      type: object
+      properties:
+        type: { type: string, enum: [GRANT, TOPUP, CONSUME, REFUND, EXPIRY, ADJUST] }
+        amount: { type: number }
+        balanceAfter: { type: number }
+        referenceType: { type: string }
+        referenceId: { type: string }
+        note: { type: string }
+        createdAt: { type: string, format: date-time }
+    OrderCreateRequest:
+      type: object
+      required: [packId]
+      properties:
+        packId: { type: string, example: pack_100 }
+    Order:
+      type: object
+      properties:
+        orderId: { type: string }
+        credits: { type: number }
+        amountPaise: { type: integer }
+        currency: { type: string, example: INR }
+        status: { type: string, enum: [created, paid, failed, refunded] }
+    RazorpayWebhook:
+      type: object
+      description: Razorpay webhook payload (signature verified via header)
+
+  responses:
+    Ok:
+      description: Success
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ApiResponse'
+              - type: object
+                properties:
+                  data: { type: object }
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /stores:
+    post:
+      summary: Create a store (onboarding completion)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Store'
+      responses:
+        '201': { $ref: '#/components/responses/Ok' }
+        '409': { description: Store already exists for this user }
+
+  /stores/{storeId}:
+    get:
+      summary: Read store profile + plan
+      parameters: [{ $in: path, name: storeId, required: true, schema: { type: string } }]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    patch:
+      summary: Update store profile
+      parameters: [{ $in: path, name: storeId, required: true, schema: { type: string } }]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+
+  /uploads/urls:
+    post:
+      summary: Request a signed upload URL (direct-to-GCS)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UploadUrlRequest' }
+      responses:
+        '200':
+          description: Signed upload URL
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/UploadUrlResponse' }
+
+  /stores/{storeId}/products:
+    get:
+      summary: List products (cursor pagination)
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    post:
+      summary: Create product
+      responses:
+        '201': { $ref: '#/components/responses/Ok' }
+
+  /stores/{storeId}/products/{productId}:
+    get:
+      summary: Get product
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    patch:
+      summary: Update product (price, qty, status)
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+    delete:
+      summary: Delete product
+      responses:
+        '204': { description: Deleted }
+
+  /jobs:
+    post:
+      summary: Create an AI job (reserves credits atomically)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/JobCreateRequest' }
+      responses:
+        '202':
+          description: Job queued
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Job' }
+        '402': { $ref: '#/components/responses/Error' }
+
+  /jobs/{jobId}:
+    get:
+      summary: Poll job status
+      parameters: [{ $in: path, name: jobId, required: true, schema: { type: string } }]
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+
+  /stores/{storeId}/credits:
+    get:
+      summary: Credit balance, plan, entitlements, pricing
+      responses:
+        '200':
+          description: Credit state
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CreditBalance' }
+
+  /stores/{storeId}/credits/ledger:
+    get:
+      summary: Credit transaction history
+      parameters:
+        - { $in: query, name: cursor, schema: { type: string } }
+        - { $in: query, name: limit, schema: { type: integer, default: 25, maximum: 100 } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+
+  /credits/packs:
+    get:
+      summary: List purchasable credit packs (for the billing UI)
+      responses:
+        '200':
+          description: Available packs and their prices
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            packId: { type: string, example: pack_100 }
+                            credits: { type: number }
+                            pricePaise: { type: integer }
+                            currency: { type: string, example: INR }
+
+  /credits/orders:
+    post:
+      summary: Create a Razorpay top-up order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrderCreateRequest' }
+      responses:
+        '201':
+          description: Razorpay order created
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/ApiResponse'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Order' }
+
+  /webhooks/razorpay:
+    post:
+      summary: Razorpay payment webhook (signature verified)
+      security: []   # webhooks authenticate via signature, not bearer token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RazorpayWebhook' }
+      responses:
+        '200': { description: Acknowledged }
+        '400': { description: Signature verification failed }
+
+  /stores/{storeId}/stats:
+    get:
+      summary: Dashboard stats (sales, clicks, AI usage)
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+
+  /stores/{storeId}/notifications:
+    get:
+      summary: In-app notifications
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+
+  /admin/credits:
+    post:
+      summary: Admin — adjust credits (requires role=admin claim)
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }

@@ -1,0 +1,8 @@
+[
+  {
+    "origin": ["https://katalogitai.web.app", "https://katalogit.ai", "https://app.katalogit.ai"],
+    "method": ["GET", "PUT", "HEAD", "OPTIONS"],
+    "responseHeader": ["Content-Type", "Content-Length", "x-goog-meta-*"],
+    "maxAgeSeconds": 3600
+  }
+]

@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <!-- SEO Meta Tags -->
+  <title>KatalogitAI — AI Product Photography for Online Sellers</title>
+  <meta name="description" content="Turn simple flat-lay photos of your fashion inventory into professional AI catalog photos — 8 catalog-ready poses per product, ready in hours. Built for Indian sellers on Amazon, Flipkart and Meesho." />
+  <meta name="keywords" content="product photography india, AI catalog, online selling, amazon product photos, flipkart seller tools, meesho catalog, fashion photography, ecommerce photos india" />
+  <meta name="author" content="KatalogitAI" />
+  <meta name="robots" content="index, follow" />
+  <link rel="canonical" href="https://katalogit.ai/" />
+  
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://katalogit.ai/" />
+  <meta property="og:title" content="KatalogitAI — AI Product Photography for Online Sellers" />
+  <meta property="og:description" content="Turn simple flat-lay photos into professional AI catalog photos — 8 poses per product, ready in hours." />
+  
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image" />
+  <meta property="twitter:url" content="https://katalogit.ai/" />
+  <meta property="twitter:title" content="KatalogitAI — AI Product Photography for Online Sellers" />
+  <meta property="twitter:description" content="Turn simple flat-lay photos into professional AI catalog photos — 8 poses per product, ready in hours." />
+  
+  <!-- Structured Data for SEO -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    "name": "KatalogitAI",
+    "url": "https://katalogit.ai",
+    "description": "AI-powered product photography and catalog creation for online sellers",
+    "address": {
+      "@type": "PostalAddress",
+      "addressCountry": "IN"
+    }
+  }
+  </script>
+  
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "KatalogitAI",
+    "applicationCategory": "BusinessApplication",
+    "offers": {
+      "@type": "Offer",
+      "price": "15",
+      "priceCurrency": "INR",
+      "description": "Approximate cost per product photoshoot at the 50-credit pack (3 credits per shoot)"
+    }
+  }
+  </script>
+  
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  
+  <!-- Font Awesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- Preloader -->
+  <div class="preloader" id="preloader">
+    <div class="preloader-inner">
+      <div class="camera-scene">
+        <div class="products-blur">
+          <div class="product-item"><i class="fas fa-shirt"></i></div>
+          <div class="product-item"><i class="fas fa-shoe-prints"></i></div>
+          <div class="product-item"><i class="fas fa-hat-wizard"></i></div>
+          <div class="product-item"><i class="fas fa-bag-shopping"></i></div>
+          <div class="product-item"><i class="fas fa-tshirt"></i></div>
+        </div>
+        <div class="camera-icon">
+          <div class="camera-body">
+            <div class="camera-lens"></div>
+            <div class="camera-flash"></div>
+          </div>
+        </div>
+        <div class="snap-text">SNAP!</div>
+      </div>
+      <div class="flash-overlay"></div>
+    </div>
+  </div>
+
+  <!-- Navigation -->
+  <nav class="navbar" id="navbar">
+    <div class="nav-container">
+      <a href="#" class="nav-logo">
+        <span class="logo-icon">📸</span>
+        KatalogitAI
+      </a>
+      <ul class="nav-links">
+        <li><a href="#how-it-works">How it Works</a></li>
+        <li><a href="#pricing">Pricing</a></li>
+        <li><a href="#results">Results</a></li>
+        <li><a href="tel:+919718282638" class="nav-phone">📞 +91 97182 82638</a></li>
+      </ul>
+      <a href="#auth" class="btn-secondary" data-auth-open>Sign In</a>
+      <a href="#contact" class="btn-demo">Get Free Demo</a>
+      <button class="nav-hamburger" id="navHamburger" aria-label="Open menu">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+    <div class="nav-mobile" id="navMobile">
+      <a href="#how-it-works">How it Works</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#results">Results</a>
+      <a href="tel:+919718282638">📞 Call Us</a>
+      <a href="#auth" class="btn-demo-mobile" data-auth-open>Sign In</a>
+      <a href="#contact" class="btn-demo-mobile">Get Free Demo</a>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero" id="hero">
+    <div class="container">
+      <div class="hero-grid">
+        <div class="hero-left">
+          <div class="hero-typing-container">
+            <div class="typing-wrapper">
+              <h1 class="hero-typing" id="heroTyping"></h1>
+              <div class="hero-brand" id="heroBrand">KatalogitAI</div>
+            </div>
+          </div>
+          <p class="hero-sub">
+            Professional product photos for Amazon, Flipkart, Meesho — ready in hours, not weeks.
+          </p>
+          <div class="hero-points">
+            <div class="hero-point">
+              <span class="point-icon">✓</span>
+              <span>From ₹15 per product</span>
+            </div>
+            <div class="hero-point">
+              <span class="point-icon">✓</span>
+              <span>Ready the same day</span>
+            </div>
+            <div class="hero-point">
+              <span class="point-icon">✓</span>
+              <span>8 professional poses per item</span>
+            </div>
+            <div class="hero-point">
+              <span class="point-icon">✓</span>
+              <span>No studio or model needed</span>
+            </div>
+          </div>
+          <div class="hero-ctas">
+            <a href="#contact" class="btn-primary btn-large">Start with 10 free credits →</a>
+            <a href="tel:+919718282638" class="btn-call">📞 Call Now</a>
+          </div>
+          <p class="hero-trust">Built for Indian fashion retailers 🇮🇳</p>
+        </div>
+        <div class="hero-right">
+          <div class="video-container">
+            <div class="hero-demo-panel" role="img" aria-label="Before and after: a flat-lay product photo becomes an AI model photoshoot">
+              <div class="demo-before">
+                <span class="demo-label">You upload</span>
+                <div class="demo-thumb">👕 Flat-lay photo</div>
+              </div>
+              <div class="demo-arrow">→</div>
+              <div class="demo-after">
+                <span class="demo-label">KatalogitAI delivers</span>
+                <div class="demo-thumb-row">
+                  <div class="demo-thumb">🧍 8 poses</div>
+                  <div class="demo-thumb">🎨 Catalog-ready</div>
+                </div>
+              </div>
+            </div>
+            <div class="video-badge">
+              <span class="badge-dot"></span>
+              One flat-lay photo in — 8 model poses out
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Problem / Comparison -->
+  <section class="comparison" id="how-it-works">
+    <div class="container">
+      <h2 class="section-heading center">
+        Stop wasting time & money on old methods
+      </h2>
+      <p class="section-sub center">
+        The old way costs thousands and takes a week. The new way is one photo.
+      </p>
+      <div class="comparison-grid">
+        
+        <!-- Traditional Way -->
+        <div class="comparison-card comparison-old">
+          <div class="comparison-badge badge-old">Old Way ❌</div>
+          <div class="comparison-image comparison-image-old">
+            <div class="comparison-image-label">📷 Photographer · Studio · Model · Editor</div>
+          </div>
+          <div class="comparison-content">
+            <h3>Traditional Agency</h3>
+            <div class="comparison-steps">
+              <div class="step-item">
+                <span class="step-num">1</span>
+                <span class="step-text">Hire agency & models</span>
+                <span class="step-time">2-3 days</span>
+              </div>
+              <div class="step-item">
+                <span class="step-num">2</span>
+                <span class="step-text">Photo shoot setup</span>
+                <span class="step-time">1 day</span>
+              </div>
+              <div class="step-item">
+                <span class="step-num">3</span>
+                <span class="step-text">Photo editing</span>
+                <span class="step-time">2-3 days</span>
+              </div>
+              <div class="step-item">
+                <span class="step-num">4</span>
+                <span class="step-text">Upload to Amazon/Flipkart</span>
+                <span class="step-time">1 day</span>
+              </div>
+              <div class="step-item">
+                <span class="step-num">5</span>
+                <span class="step-text">Wait for sales (bad SEO)</span>
+                <span class="step-time">Weeks</span>
+              </div>
+            </div>
+            <div class="comparison-cost">
+              <div class="cost-label">Total Cost:</div>
+              <div class="cost-value bad">₹500-2,000+ per item</div>
+              <div class="cost-time">Takes 5-7 days minimum</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- KatalogitAI Way -->
+        <div class="comparison-card comparison-new">
+          <div class="comparison-badge badge-new">KatalogitAI ✨</div>
+          <div class="comparison-image comparison-image-new">
+            <div class="comparison-image-label">📱 Phone photo → ✨ AI photoshoot</div>
+          </div>
+          <div class="comparison-content">
+            <h3>KatalogitAI (1 Click!)</h3>
+            <div class="comparison-steps">
+              <div class="step-item">
+                <span class="step-num">1</span>
+                <span class="step-text">Take photo with phone</span>
+                <span class="step-time">1 minute</span>
+              </div>
+              <div class="step-item">
+                <span class="step-num">2</span>
+                <span class="step-text">Upload to KatalogitAI</span>
+                <span class="step-time">30 seconds</span>
+              </div>
+              <div class="step-item">
+                <span class="step-num">3</span>
+                <span class="step-text">AI creates 6-8 photos</span>
+                <span class="step-time">2-3 hours</span>
+              </div>
+              <div class="step-item highlighted">
+                <span class="step-num">✓</span>
+                <span class="step-text"><strong>DONE! Download & upload</strong></span>
+                <span class="step-time">Same day</span>
+              </div>
+              <div class="step-item highlighted">
+                <span class="step-num">💰</span>
+                <span class="step-text"><strong>Start getting orders</strong></span>
+                <span class="step-time">Within 24 hours</span>
+              </div>
+            </div>
+            <div class="comparison-cost">
+              <div class="cost-label">Total Cost:</div>
+              <div class="cost-value good">From ₹15 per item</div>
+              <div class="cost-time">Ready the same day ⚡</div>
+            </div>
+          </div>
+          <div class="popular-ribbon">Most Popular</div>
+        </div>
+        
+      </div>
+      
+      <div class="comparison-cta">
+        <p class="cta-text">Want us to do it for you? <strong>Bulk orders welcome!</strong></p>
+        <a href="#contact" class="btn-primary">Talk to Our Team →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works (honest product walkthrough) -->
+  <section class="results" id="results">
+    <div class="container">
+      <h2 class="section-heading center">
+        Your catalogue, handled end to end
+      </h2>
+      <p class="section-sub center">
+        One flat-lay photo in — eight catalog-ready poses out, the same day.
+      </p>
+
+      <div class="results-grid">
+
+        <!-- Pipeline -->
+        <div class="results-graph">
+          <div class="graph-header">
+            <h3>How a photoshoot works</h3>
+            <p>From your phone to your listing — no studio, no model, no editor</p>
+          </div>
+          <div class="pipeline-steps">
+            <div class="pipeline-step">
+              <span class="step-num">1</span>
+              <div>
+                <strong>Snap a flat-lay photo</strong>
+                <span>Lay the garment flat on any surface and take a photo on your phone.</span>
+              </div>
+            </div>
+            <div class="pipeline-step">
+              <span class="step-num">2</span>
+              <div>
+                <strong>KatalogitAI generates 8 poses</strong>
+                <span>A professional model wears your garment in 8 catalog poses with consistent styling.</span>
+              </div>
+            </div>
+            <div class="pipeline-step">
+              <span class="step-num">3</span>
+              <div>
+                <strong>Review &amp; approve</strong>
+                <span>Nothing goes live without your approval — retake or regenerate any shot.</span>
+              </div>
+            </div>
+            <div class="pipeline-step">
+              <span class="step-num">4</span>
+              <div>
+                <strong>Download &amp; upload</strong>
+                <span>Export-ready images for Amazon, Flipkart, Meesho and more.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Honest value props -->
+        <div class="results-testimonials">
+          <div class="value-card">
+            <h3>Built for real catalogues</h3>
+            <ul class="value-list">
+              <li><span class="feat-icon">✓</span> <strong>8 poses per product</strong> — one consistent model across your whole catalogue</li>
+              <li><span class="feat-icon">✓</span> <strong>Pay per shoot</strong> — 3 credits per photoshoot, no monthly fee</li>
+              <li><span class="feat-icon">✓</span> <strong>From ₹15 per product</strong> — vs ₹500+ for a traditional shoot</li>
+              <li><span class="feat-icon">✓</span> <strong>Your photos stay yours</strong> — private per-store storage, server-side protected</li>
+              <li><span class="feat-icon">✓</span> <strong>Start with 10 free credits</strong> — no credit card required</li>
+            </ul>
+            <div class="value-cta">
+              <a href="#contact" class="btn-primary">Try it free →</a>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- Brand Carousel -->
+  <section class="brands">
+    <div class="container">
+      <p class="brands-label">Export-ready for every marketplace you sell on</p>
+      <div class="brands-carousel">
+        <div class="brand-item"><div class="brand-logo">Amazon</div></div>
+        <div class="brand-item"><div class="brand-logo">Flipkart</div></div>
+        <div class="brand-item"><div class="brand-logo">Meesho</div></div>
+        <div class="brand-item"><div class="brand-logo">Myntra</div></div>
+        <div class="brand-item"><div class="brand-logo">Shopify</div></div>
+        <div class="brand-item"><div class="brand-logo">Etsy</div></div>
+        <div class="brand-item"><div class="brand-logo">Snapdeal</div></div>
+        <div class="brand-item"><div class="brand-logo">Paytm Mall</div></div>
+        <div class="brand-item"><div class="brand-logo">Nykaa</div></div>
+        <div class="brand-item"><div class="brand-logo">Ajio</div></div>
+        <div class="brand-item"><div class="brand-logo">Tata CLiQ</div></div>
+        <div class="brand-item"><div class="brand-logo">JioMart</div></div>
+        <div class="brand-item"><div class="brand-logo">BigCommerce</div></div>
+        <div class="brand-item"><div class="brand-logo">WooCommerce</div></div>
+        <div class="brand-item"><div class="brand-logo">Magento</div></div>
+        <!-- Duplicate for infinite scroll -->
+        <div class="brand-item"><div class="brand-logo">Amazon</div></div>
+        <div class="brand-item"><div class="brand-logo">Flipkart</div></div>
+        <div class="brand-item"><div class="brand-logo">Meesho</div></div>
+        <div class="brand-item"><div class="brand-logo">Myntra</div></div>
+        <div class="brand-item"><div class="brand-logo">Shopify</div></div>
+        <div class="brand-item"><div class="brand-logo">Etsy</div></div>
+        <div class="brand-item"><div class="brand-logo">Snapdeal</div></div>
+        <div class="brand-item"><div class="brand-logo">Paytm Mall</div></div>
+        <div class="brand-item"><div class="brand-logo">Nykaa</div></div>
+        <div class="brand-item"><div class="brand-logo">Ajio</div></div>
+        <div class="brand-item"><div class="brand-logo">Tata CLiQ</div></div>
+        <div class="brand-item"><div class="brand-logo">JioMart</div></div>
+        <div class="brand-item"><div class="brand-logo">BigCommerce</div></div>
+        <div class="brand-item"><div class="brand-logo">WooCommerce</div></div>
+        <div class="brand-item"><div class="brand-logo">Magento</div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Pricing -->
+  <section class="pricing" id="pricing">
+    <div class="container">
+      <h2 class="section-heading center">Simple Pricing. No Hidden Charges.</h2>
+      <p class="section-sub center">Pay only for what you use. Cancel anytime.</p>
+      
+      <div class="pricing-grid">
+        
+        <div class="pricing-card">
+          <div class="pricing-header">
+            <h3 class="pricing-name">Starter</h3>
+            <div class="pricing-price">
+              <span class="currency">₹</span>249<span class="unit">/50 credits</span>
+            </div>
+            <p class="pricing-desc">≈ ₹15 per photoshoot · ~16 shoots</p>
+          </div>
+          <ul class="pricing-features">
+            <li><span class="feat-icon">✓</span> 8 professional poses per product</li>
+            <li><span class="feat-icon">✓</span> Review &amp; approve before going live</li>
+            <li><span class="feat-icon">✓</span> Secure wallet — top up anytime</li>
+            <li><span class="feat-icon">✓</span> WhatsApp support</li>
+            <li><span class="feat-icon">✓</span> Ready-to-upload files</li>
+          </ul>
+          <a href="#contact" class="btn-pricing">Get Started →</a>
+        </div>
+        
+        <div class="pricing-card pricing-popular">
+          <div class="pricing-badge">Most Popular 🔥</div>
+          <div class="pricing-header">
+            <h3 class="pricing-name">Growth</h3>
+            <div class="pricing-price">
+              <span class="currency">₹</span>499<span class="unit">/120 credits</span>
+            </div>
+            <p class="pricing-desc">≈ ₹12.5 per photoshoot · ~40 shoots</p>
+          </div>
+          <ul class="pricing-features">
+            <li><span class="feat-icon">✓</span> Everything in Starter</li>
+            <li><span class="feat-icon">✓</span> Lower per-shoot cost</li>
+            <li><span class="feat-icon">✓</span> Priority queue</li>
+            <li><span class="feat-icon">✓</span> Phone + WhatsApp support</li>
+            <li><span class="feat-icon">✓</span> Free shot regenerations</li>
+          </ul>
+          <a href="#contact" class="btn-pricing btn-pricing-popular">Start Free Trial →</a>
+        </div>
+        
+        <div class="pricing-card">
+          <div class="pricing-header">
+            <h3 class="pricing-name">Pro</h3>
+            <div class="pricing-price">
+              <span class="currency">₹</span>999<span class="unit">/300 credits</span>
+            </div>
+            <p class="pricing-desc">≈ ₹10 per photoshoot · ~100 shoots</p>
+          </div>
+          <ul class="pricing-features">
+            <li><span class="feat-icon">✓</span> Everything in Growth</li>
+            <li><span class="feat-icon">✓</span> Best per-shoot rate</li>
+            <li><span class="feat-icon">✓</span> Bulk catalogue imports</li>
+            <li><span class="feat-icon">✓</span> Dedicated support</li>
+            <li><span class="feat-icon">✓</span> White-label branding option</li>
+          </ul>
+          <a href="#contact" class="btn-pricing">Contact Sales →</a>
+        </div>
+        
+      </div>
+      
+      <div class="pricing-guarantee">
+        <p>🎁 <strong>Start with 10 free credits</strong> — try your first shoots before paying anything.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Contact / CTA -->
+  <section class="contact" id="contact">
+    <div class="container">
+      <div class="contact-box">
+        <h2 class="section-heading center white">Ready to build a catalogue that sells?</h2>
+        <p class="section-sub center white">Start with 10 free credits. No credit card needed.</p>
+        
+        <form class="contact-form" id="contactForm">
+          <!-- honeypot fields — invisible to humans, bots fill them and get dropped -->
+          <div style="position:absolute;left:-9999px;top:-9999px" aria-hidden="true">
+            <input type="text" name="website" tabindex="-1" autocomplete="off" />
+            <input type="text" name="company" tabindex="-1" autocomplete="off" />
+            <input type="text" name="url" tabindex="-1" autocomplete="off" />
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <input type="text" name="name" placeholder="Your Name *" required />
+            </div>
+            <div class="form-group">
+              <input type="tel" name="phone" placeholder="WhatsApp Number *" required />
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <input type="email" name="email" placeholder="Email Address *" required />
+            </div>
+            <div class="form-group">
+              <input type="text" name="products" placeholder="How many products? (approx)" />
+            </div>
+          </div>
+          <div class="form-group">
+            <select name="platform" required>
+              <option value="">Which platform do you sell on? *</option>
+              <option value="amazon">Amazon</option>
+              <option value="flipkart">Flipkart</option>
+              <option value="meesho">Meesho</option>
+              <option value="myntra">Myntra</option>
+              <option value="shopify">Shopify</option>
+              <option value="own-website">Own Website</option>
+              <option value="multiple">Multiple Platforms</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <button type="submit" class="btn-primary btn-large btn-submit">
+            Send my details →
+          </button>
+          <p class="form-note">We'll reach out within a business day. Prefer instant? Call or WhatsApp below. 📞</p>
+        </form>
+        
+        <div class="contact-direct">
+          <p>Prefer to talk directly?</p>
+          <div class="contact-buttons">
+            <a href="tel:+919718282638" class="btn-contact">📞 Call: +91 97182 82638</a>
+            <a href="https://wa.me/919718282638" class="btn-contact" target="_blank" rel="noopener">💬 WhatsApp Us</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-content">
+        <div class="footer-brand">
+          <div class="footer-logo">
+            <span class="logo-icon">📸</span>
+            KatalogitAI
+          </div>
+          <p>Visual commerce infrastructure for Indian retail</p>
+        </div>
+        <div class="footer-links">
+          <a href="#how-it-works">How it Works</a>
+          <a href="#pricing">Pricing</a>
+          <a href="/privacy">Privacy</a>
+          <a href="/terms">Terms</a>
+          <a href="tel:+919718282638">📞 +91 97182 82638</a>
+          <a href="mailto:hello@katalogit.ai">✉️ hello@katalogit.ai</a>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <p>© 2026 KatalogitAI. All rights reserved. Made with ❤️ for Indian sellers.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Auth Modal (secure sign-in / sign-up) -->
+  <div class="auth-modal" id="authModal" role="dialog" aria-modal="true" aria-label="Sign in or create an account">
+    <div class="auth-modal-box">
+      <button class="auth-close" aria-label="Close">&times;</button>
+      <div class="auth-head">
+        <div class="auth-logo"><span class="logo-icon">📸</span> KatalogitAI</div>
+        <h3 class="auth-title">Seller Access</h3>
+        <p class="auth-sub">Sign in to your store dashboard.</p>
+      </div>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="signin">Sign In</button>
+        <button class="auth-tab" data-tab="signup">Create Account</button>
+      </div>
+      <div class="auth-body"></div>
+      <p class="auth-error" style="display:none"></p>
+    </div>
+  </div>
+
+  <!-- Firebase (compat) — real account creation & sign-in -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="auth.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+[
+  {
+    "id": "front",
+    "name": "Front — standing straight",
+    "prompt": "standing straight, facing the camera, full body, both arms relaxed at the sides, neutral confident pose",
+    "keypoints": [[256,128,1],[241,118,1],[271,118,1],[228,126,1],[284,126,1],[215,205,1],[297,205,1],[203,302,1],[309,302,1],[196,398,1],[316,398,1],[222,420,1],[290,420,1],[222,560,1],[290,560,1],[224,716,1],[288,716,1]]
+  },
+  {
+    "id": "three_quarter",
+    "name": "Three-quarter turn",
+    "prompt": "turned three-quarter toward the camera, looking at the camera, full body, natural relaxed stance",
+    "keypoints": [[256,124,1],[239,114,1],[273,114,1],[224,121,1],[288,121,1],[198,200,1],[314,204,1],[184,286,1],[324,302,1],[176,376,1],[332,392,1],[208,418,1],[304,422,1],[206,554,1],[306,560,1],[208,712,1],[304,716,1]]
+  },
+  {
+    "id": "side",
+    "name": "Side profile",
+    "prompt": "side profile facing left, full body, elegant standing pose, head held straight",
+    "keypoints": [[212,126,1],[199,115,1],[0,0,0],[190,123,1],[0,0,0],[203,206,1],[0,0,0],[188,302,1],[0,0,0],[180,394,1],[0,0,0],[212,420,1],[0,0,0],[216,558,1],[0,0,0],[218,714,1],[0,0,0]]
+  },
+  {
+    "id": "back",
+    "name": "Back view, head turned",
+    "prompt": "seen from the back, head turned toward the camera over the shoulder, full body",
+    "keypoints": [[268,126,1],[0,0,0],[0,0,0],[255,124,1],[281,124,0],[228,208,1],[300,208,1],[210,306,1],[318,306,1],[202,402,1],[326,402,1],[228,422,1],[292,422,1],[228,562,1],[292,562,1],[230,716,1],[290,716,1]]
+  },
+  {
+    "id": "hands_on_hips",
+    "name": "Hands on hips",
+    "prompt": "standing facing the camera, hands on hips, full body, confident editorial pose",
+    "keypoints": [[256,126,1],[241,116,1],[271,116,1],[228,124,1],[284,124,1],[218,204,1],[294,204,1],[198,268,1],[314,268,1],[224,408,1],[288,408,1],[224,420,1],[288,420,1],[224,560,1],[288,560,1],[226,716,1],[286,716,1]]
+  },
+  {
+    "id": "walking",
+    "name": "Walking candid",
+    "prompt": "walking naturally toward the camera, three-quarter angle, candid full-body movement pose",
+    "keypoints": [[256,124,1],[240,114,1],[272,114,1],[227,122,1],[285,122,1],[214,202,1],[298,204,1],[202,294,1],[310,298,1],[194,386,1],[318,390,1],[222,418,1],[290,418,1],[236,528,1],[278,566,1],[248,688,1],[268,720,1]]
+  },
+  {
+    "id": "seated",
+    "name": "Seated on stool",
+    "prompt": "sitting upright on a wooden stool, knees together, full body, looking at the camera",
+    "keypoints": [[256,116,1],[241,106,1],[271,106,1],[228,114,1],[284,114,1],[215,192,1],[297,192,1],[200,274,1],[312,274,1],[192,358,1],[320,358,1],[222,428,1],[290,428,1],[240,492,1],[272,492,1],[244,620,1],[268,620,1]]
+  },
+  {
+    "id": "pocket",
+    "name": "Casual, hand in pocket",
+    "prompt": "casual standing pose facing the camera, one hand in pocket, full body, relaxed",
+    "keypoints": [[256,126,1],[241,116,1],[271,116,1],[228,124,1],[284,124,1],[216,204,1],[296,204,1],[200,292,1],[310,286,1],[224,406,1],[318,394,1],[224,420,1],[288,420,1],[226,560,1],[288,558,1],[228,716,1],[286,714,1]]
+  }
+]
