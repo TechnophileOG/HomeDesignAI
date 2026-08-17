@@ -5,16 +5,16 @@
      authenticates via Razorpay's HMAC-SHA256 signature over the raw body.
    • Every webhook event is stored once (idempotency) and credit top-ups use
      ledger idempotency keys — a doubled webhook can never double-grant.
-   • Admin endpoints are gated by the ADMIN_EMAILS allowlist (from Secret
-     Manager/deploy env, never client-supplied).
+   • Admin endpoints are gated by requireAdmin — OWNER_EMAIL + a short-lived
+     passcode-issued session token (never client-supplied).
    ════════════════════════════════════════════════════════════════════════ */
 
 import { createHmac, createHash, timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { db, now, ordersColl, storeRef, storesColl, globalLedgerColl, adminAlertsColl, snap } from '../db.js';
+import { db, now, ordersColl, subscriptionsColl, storeRef, storesColl, globalLedgerColl, adminAlertsColl, snap } from '../db.js';
 import { getWallet, listLedger, grantCredits, refundCredits } from '../ledger.js';
-import { CREDIT_PACKS, RAZORPAY, razorpayConfigured, WEBHOOK_MAX_AGE_SECONDS } from '../config.js';
+import { CREDIT_PACKS, CREDIT_PRICING, SUBSCRIPTION_PLAN, RAZORPAY, razorpayConfigured, subscriptionConfigured, WEBHOOK_MAX_AGE_SECONDS } from '../config.js';
 import { orderCreate, adminAdjust } from '../validate.js';
 import { badRequest, notFound, notConfigured, tooMany } from '../errors.js';
 import { userLimiter } from '../rate-limit.js';
@@ -43,8 +43,6 @@ export const creditsRouter = Router();
 
 /* ── balance + ledger ─────────────────────────────────────────────────── */
 
-const PRICING = { model_shoot: 3, regen_shot: 1, full_regen: 3, retake: 1 };
-
 creditsRouter.get('/stores/:storeId/credits', requireStoreOwner, async (req, res, next) => {
   try {
     const wallet = await getWallet(req.store.id);
@@ -54,7 +52,7 @@ creditsRouter.get('/stores/:storeId/credits', requireStoreOwner, async (req, res
       : plan === 'pro'
         ? ['priority_queue', 'custom_model']
         : ['basic_shoots'];
-    res.json({ ok: true, data: { balance: wallet.balance, plan, entitlements, pricing: PRICING } });
+    res.json({ ok: true, data: { balance: wallet.balance, plan, entitlements, pricing: CREDIT_PRICING } });
   } catch (err) { next(err); }
 });
 
@@ -130,6 +128,77 @@ creditsRouter.post('/credits/orders', orderLimiter, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/* ── Pro subscription (Razorpay recurring) ─────────────────────────────── */
+
+// GET /credits/subscription — the plan card (public pricing, no secrets).
+creditsRouter.get('/credits/subscription', (_req, res) => {
+  res.json({
+    ok: true,
+    data: {
+      plan: {
+        pricePaise: SUBSCRIPTION_PLAN.pricePaise,
+        monthlyCredits: SUBSCRIPTION_PLAN.monthlyCredits,
+        currency: SUBSCRIPTION_PLAN.currency,
+        configured: subscriptionConfigured(),
+      },
+    },
+  });
+});
+
+// POST /credits/subscriptions — create a Razorpay subscription (12 monthly
+// renewals). The store id is derived from the authenticated user, never from
+// the body. The webhook grants 40 credits + PRO on every `subscription.charged`.
+creditsRouter.post('/credits/subscriptions', orderLimiter, async (req, res, next) => {
+  try {
+    if (!subscriptionConfigured()) {
+      throw notConfigured('PAYMENTS_NOT_CONFIGURED', 'Pro subscription is not available yet.');
+    }
+
+    // Store id is derived from the authenticated user — never from the body.
+    const storeId = `store-${req.user.uid.slice(0, 8)}`;
+    const receipt = `kat-sub-${now().toString(36)}`;
+
+    const basic = Buffer.from(`${RAZORPAY.keyId}:${RAZORPAY.keySecret}`).toString('base64');
+    const rpRes = await fetch('https://api.razorpay.com/v1/subscriptions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Basic ${basic}`,
+      },
+      body: JSON.stringify({
+        plan_id: SUBSCRIPTION_PLAN.planId,
+        total_count: 12,           // 12 monthly renewals
+        customer_notify: 1,
+        notes: { storeId, uid: req.user.uid },
+      }),
+    });
+    if (!rpRes.ok) {
+      console.error('[razorpay] subscription create failed:', rpRes.status, await rpRes.text().catch(() => ''));
+      throw new Error('razorpay subscription failed');
+    }
+    const sub = await rpRes.json();
+
+    await subscriptionsColl().doc(sub.id).set({
+      subscriptionId: sub.id,
+      storeId,
+      uid: req.user.uid,
+      status: sub.status || 'created',
+      createdAt: now(),
+      updatedAt: now(),
+    });
+
+    res.status(201).json({
+      ok: true,
+      data: {
+        subscriptionId: sub.id,
+        keyId: RAZORPAY.keyId, // public by design (checkout UI needs it)
+        amountPaise: SUBSCRIPTION_PLAN.pricePaise,
+        currency: 'INR',
+      },
+    });
+  } catch (err) { next(err); }
+});
+
 /* ── Razorpay webhook — NO bearer token; authenticates via HMAC signature.
    Mounted OUTSIDE the auth gate (see server.js). Reads req.rawBody.   ── */
 
@@ -192,6 +261,8 @@ webhookRouter.post('/razorpay', webhookLimiter, async (req, res, next) => {
           const capturedCur = payment.currency || 'INR';
           if (Number.isFinite(capturedPaise) && capturedPaise === order.amountPaise && capturedCur === order.currency) {
             // Idempotent by payment id — retries of this webhook can't double-grant.
+            // A successful PAID top-up also upgrades the wallet to PRO inside the
+            // same transaction+idempotency marker (replays can't re-apply it).
             await grantCredits({
               storeId: order.storeId,
               amount: order.credits,
@@ -199,6 +270,7 @@ webhookRouter.post('/razorpay', webhookLimiter, async (req, res, next) => {
               type: 'TOPUP',
               note: `Razorpay top-up · ${order.packId}`,
               actor: 'razorpay',
+              plan: 'pro',
             });
             await ordersColl().doc(razorpayOrderId).update({ status: 'paid', paidAt: now(), paymentId: payment.id });
           } else {
@@ -209,11 +281,48 @@ webhookRouter.post('/razorpay', webhookLimiter, async (req, res, next) => {
       }
     }
 
+    // Pro subscription: each monthly renewal (`subscription.charged`) grants
+    // the monthly credit allowance + PRO, exactly once per payment. Cancels
+    // and completions flip the subscription record (wallet plan stays until
+    // the store actually runs out — a mid-cycle cancel keeps existing perks).
+    if (payload.event === 'subscription.charged') {
+      const sub = payload.payload?.subscription?.entity;
+      const payment = payload.payload?.payment?.entity;
+      const subId = sub?.id;
+      const paymentId = payment?.id;
+      if (subId && paymentId) {
+        const subDoc = await subscriptionsColl().doc(subId).get();
+        if (subDoc.exists) {
+          const storeId = subDoc.data().storeId;
+          await grantCredits({
+            storeId,
+            amount: SUBSCRIPTION_PLAN.monthlyCredits,
+            idemKey: `sub:${paymentId}`,            // one grant per payment — replay-safe
+            type: 'SUBGRANT',
+            note: `Pro subscription · monthly credits`,
+            actor: 'razorpay',
+            plan: 'pro',
+          });
+          await subscriptionsColl().doc(subId).update({ status: 'active', updatedAt: now() });
+        }
+      }
+    }
+
+    if (payload.event === 'subscription.cancelled' || payload.event === 'subscription.completed') {
+      const subId = payload.payload?.subscription?.entity?.id;
+      if (subId) {
+        await subscriptionsColl().doc(subId).update({
+          status: payload.event === 'subscription.cancelled' ? 'cancelled' : 'completed',
+          updatedAt: now(),
+        }).catch((e) => console.error('[razorpay] sub status update failed:', e && e.message ? e.message : e));
+      }
+    }
+
     res.json({ ok: true, data: { received: true } });
   } catch (err) { next(err); }
 });
 
-/* ── admin (ADMIN_EMAILS allowlist) ───────────────────────────────────── */
+/* ── owner console (requireAdmin: OWNER_EMAIL + unlock session) ────────── */
 
 // GET /admin/stores — every store with its live wallet balance (admin console).
 creditsRouter.get('/admin/stores', requireAdmin, async (req, res, next) => {
@@ -240,9 +349,9 @@ creditsRouter.get('/admin/ledger', requireAdmin, async (req, res, next) => {
 });
 
 // POST /admin/credits — adjust a store's balance (grant or reverse).
-// 🔒 requireAdmin = ADMIN_EMAILS allowlist (see auth.js) — NEVER just
-//    "signed in". Any authenticated user reaching this otherwise could
-//    mint themselves unlimited credits.
+// 🔒 requireAdmin = OWNER_EMAIL + passcode-issued session (see auth.js) —
+//    NEVER just "signed in". Any authenticated user reaching this otherwise
+//    could mint themselves unlimited credits.
 creditsRouter.post('/admin/credits', requireAdmin, async (req, res, next) => {
   try {
     const body = adminAdjust(req.body || {});
@@ -290,6 +399,50 @@ creditsRouter.post('/admin/follow-ups/:id/resolve', requireAdmin, async (req, re
     if (!doc.exists) throw notFound('Alert not found.');
     await ref.update({ resolved: true, resolvedTs: now(), resolvedBy: req.user.email });
     res.json({ ok: true, data: { alert: snap(await ref.get()) } });
+  } catch (err) { next(err); }
+});
+
+// GET /admin/jobs — AI jobs across ALL stores (newest first). Enriches each
+// job with the store name for the admin console.
+creditsRouter.get('/admin/jobs', requireAdmin, async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 60), 200);
+    const snap2 = await db.collectionGroup('jobs').orderBy('createdAt', 'desc').limit(limit).get();
+    const jobs = snap2.docs.map(snap);
+
+    // Store names (one batched lookup via Promise.all — cheap at admin scale).
+    const names = {};
+    await Promise.all(jobs.map(async (j) => {
+      if (!j.storeId || names[j.storeId]) return;
+      const s = await storeRef(j.storeId).get().catch(() => null);
+      if (s && s.exists) names[j.storeId] = s.data().name || j.storeId;
+      else names[j.storeId] = j.storeId;
+    }));
+    res.json({ ok: true, data: { jobs: jobs.map((j) => ({ ...j, storeName: names[j.storeId] || j.storeId })) } });
+  } catch (err) { next(err); }
+});
+
+// GET /admin/orders — Razorpay top-up orders + subscriptions (newest first).
+creditsRouter.get('/admin/orders', requireAdmin, async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 60), 200);
+    const [orders, subs] = await Promise.all([
+      ordersColl().orderBy('createdAt', 'desc').limit(limit).get(),
+      subscriptionsColl().orderBy('createdAt', 'desc').limit(limit).get(),
+    ]);
+    const items = [
+      ...orders.docs.map((d) => ({ kind: 'order', ...snap(d) })),
+      ...subs.docs.map((d) => ({ kind: 'subscription', ...snap(d) })),
+    ].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, limit);
+
+    const names = {};
+    await Promise.all(items.map(async (it) => {
+      if (!it.storeId || names[it.storeId]) return;
+      const s = await storeRef(it.storeId).get().catch(() => null);
+      if (s && s.exists) names[it.storeId] = s.data().name || it.storeId;
+      else names[it.storeId] = it.storeId;
+    }));
+    res.json({ ok: true, data: { orders: items.map((it) => ({ ...it, storeName: names[it.storeId] || it.storeId })) } });
   } catch (err) { next(err); }
 });
 

@@ -106,7 +106,7 @@ function writeSession(u, name, phone) {
     name: name || u.displayName || '',
     phone: phone || u.phoneNumber || '',
     email: (u.email || '').toLowerCase(),
-    isAdmin: false, // decided server-side (ADMIN_EMAILS) in the app
+    isAdmin: false, // decided server-side (OWNER_EMAIL + unlock session) in the app
     token: '',
     createdAt: new Date().toISOString(),
     expiresAt: '',
@@ -202,12 +202,30 @@ async function signIn(_args) {
   }
 }
 
+/* Transactional mail goes through OUR backend (rate-limited + audited) —
+   NOT the Firebase SDK directly. The SDK's direct reset call had no limit
+   of its own: a spammed "forgot password" button dropped a dozen emails. */
+var API_V1 = 'https://katalogit-api-787935596465.asia-south1.run.app/api/v1';
+var RESET_API = API_V1 + '/public/auth/reset-email';
+var VERIFY_API = API_V1 + '/me/send-verification';
+
 async function sendPasswordReset(email) {
   var cleanEmail = sanitizeEmail(email);
   if (!cleanEmail) return { ok: false, error: 'Enter a valid email address.' };
   try {
-    await fbAuth.sendPasswordResetEmail(cleanEmail);
-    // Generic reply either way — never reveal whether an account exists.
+    var res = await fetch(RESET_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail }),
+    });
+    if (!res.ok) {
+      var body = null;
+      try { body = await res.json(); } catch (e) { /* non-JSON */ }
+      if (body && body.error && body.error.code === 'RATE_LIMITED') {
+        return { ok: false, error: 'Too many reset requests. Please wait a few minutes.' };
+      }
+      return { ok: false, error: 'If an account exists for that email, a reset link is on its way.' };
+    }
     return { ok: true };
   } catch (err) {
     return { ok: false, error: 'If an account exists for that email, a reset link is on its way.' };
@@ -217,6 +235,16 @@ async function sendPasswordReset(email) {
 async function sendVerification() {
   var u = fbAuth.currentUser;
   if (!u) return { ok: false, error: 'No active session.' };
+  // Preferred: our backend (branded email + per-user rate limiting).
+  try {
+    var token = await u.getIdToken();
+    var res = await fetch(VERIFY_API, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    if (res.ok) return { ok: true };
+  } catch (e) { /* fall through to the SDK fallback */ }
   try {
     await u.sendEmailVerification();
     return { ok: true };
@@ -346,7 +374,7 @@ window.KatalogitAuth = {
       window.KatalogitAuth.signInWithGoogle().then(function (res) {
         if (res.ok) {
           showError('');
-          window.location.href = '/app';
+          window.location.href = '/app/';
         } else {
           googleBtn.disabled = false;
           googleBtn.innerHTML = 'Continue with Google';
@@ -366,7 +394,7 @@ window.KatalogitAuth = {
       window.KatalogitAuth.signIn({ email: email, password: pw }).then(function (res) {
         if (res.ok) {
           showError('');
-          window.location.href = '/app'; // same origin — Firebase session is shared
+          window.location.href = '/app/'; // same origin — Firebase session is shared
         } else {
           showError(res.error);
           submit.disabled = false;
@@ -445,7 +473,7 @@ window.KatalogitAuth = {
     p.innerHTML = 'We sent a verification link to <strong>' + escapeHtml(email) + '</strong>. ' +
       'Click it to activate your account — your store stays protected from fraud.';
     var go = document.createElement('a');
-    go.href = '/app';
+    go.href = '/app/';
     go.className = 'btn-primary btn-large auth-submit';
     go.textContent = 'Continue to dashboard →';
     var resend = document.createElement('button');
@@ -493,17 +521,38 @@ window.KatalogitAuth = {
     var msg = document.createElement('p');
     msg.className = 'auth-note';
 
+    // Anti-spam: one reset email per minute, max 3 per session.
+    var sends = 0;
+    var cooldown = 0;
+    var tick = null;
+
     form.addEventListener('submit', function (e) {
       e.preventDefault();
+      if (cooldown > 0 || sends >= 3) return;
       var email = document.getElementById('authForgotEmail').value;
       submit.disabled = true;
       submit.textContent = 'Sending…';
       window.KatalogitAuth.sendPasswordReset(email).then(function (res) {
-        msg.textContent = res.ok
-          ? 'If an account exists for that email, a reset link is on its way. Check your inbox (and spam).'
-          : res.error;
-        submit.disabled = false;
-        submit.textContent = 'Send Reset Link';
+        if (res.ok) {
+          sends += 1;
+          msg.textContent = 'If an account exists for that email, a reset link is on its way. Check your inbox (and spam).';
+          cooldown = 60;
+          tick = setInterval(function () {
+            cooldown -= 1;
+            if (cooldown <= 0) {
+              clearInterval(tick);
+              submit.disabled = sends >= 3;
+              submit.textContent = sends >= 3 ? 'Limit reached' : 'Send Reset Link';
+            } else {
+              submit.disabled = true;
+              submit.textContent = 'Resend in ' + cooldown + 's';
+            }
+          }, 1000);
+        } else {
+          msg.textContent = res.error;
+          submit.disabled = false;
+          submit.textContent = 'Send Reset Link';
+        }
       });
     });
 

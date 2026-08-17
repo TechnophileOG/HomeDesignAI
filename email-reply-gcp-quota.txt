@@ -1,0 +1,56 @@
+═══════════════════════════════════════════════════════════════════
+ REPLY DRAFT — send to: Deeksha Kushwaha (deeksha@cloud-ace.com)
+ CC: Deepanshu Bhatia (debhatia@google.com), Jitesh Kumar (kjitesh@xwf.google.com)
+═══════════════════════════════════════════════════════════════════
+
+Subject: Re: GCP Quota — our decision (no partner billing, proceed with internal quota request)
+
+Dear Deeksha and Deepanshu,
+
+Thank you for the detailed meeting minutes and for the support so far.
+
+After discussing internally with my co-founder, here is our decision:
+
+1. We will NOT move to Cloud Ace partner billing at this stage. As an
+   early-stage startup we are intentionally relying on our remaining trial
+   credits to keep our burn rate near zero while we validate the product
+   with our first customers. We also prefer to keep direct control of our
+   billing and account. We will revisit partner billing once we have
+   meaningful, recurring monthly usage.
+
+2. Deepanshu — you offered to assist with the internal quota increase
+   request. Please go ahead with it on our existing account. We understand
+   the new-user credits cannot be applied toward GPU usage, and we accept
+   that any GPU compute would be billed separately once quota is granted.
+   We are ready to provide any documents needed to verify our business.
+
+3. Please confirm in writing that our remaining trial credits (~₹28,000)
+   CAN be applied to non-GPU services — Firestore, Cloud Run, Cloud
+   Storage, Cloud Functions, and the Gemini API — so we can plan how we
+   spend the remaining credits on the non-GPU parts of our stack.
+
+4. In the meantime, we will continue validating our GPU pipeline on
+   free/cheaper alternatives (Kaggle free T4, etc.) so we are ready to
+   scale the moment GPU quota is available.
+
+Thank you again for your time and guidance.
+
+Best regards,
+Manas Agarwal
+Arcotix Labs — KatalogitAI
+(agarwalmanas009@gmail.com)
+
+═══════════════════════════════════════════════════════════════════
+ WHY THIS REPLY (your talking points, not to send):
+ • Google's own account manager ALREADY confirmed credits can't pay for
+   GPU. So partner billing gives you nothing for the GPU except a quota
+   request they can also file internally — while costing you ₹28k of
+   credits AND handing Cloud Ace a margin on all your future spend.
+ • The ₹28k credits are still valuable — they cover Firestore, Cloud Run,
+   Storage, Gemini = your entire non-GPU backend for months.
+ • Deepanshu already offered the internal quota lift (last email). Hold
+   him to it — that's free and doesn't touch your credits.
+ • Keep the door open to partner billing later, so they stay helpful
+   instead of going cold. The 5% discount is real but meaningless at
+   near-zero current spend.
+═══════════════════════════════════════════════════════════════════

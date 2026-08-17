@@ -1,12 +1,10 @@
-import React, { useState } from 'react';
-import { User, Shield, ShieldCheck, HelpCircle, Globe, Cpu, RefreshCw, Sparkles, LogOut, MailCheck } from 'lucide-react';
+import React from 'react';
+import { User, ShieldCheck, HelpCircle, FileText, Shield, LogOut, MailCheck, Sparkles } from 'lucide-react';
 import { WalletCard } from './CreditsWallet';
 
 export default function SettingsView({
   profile,
   wallet,
-  lightweightMode,
-  setLightweightMode,
   onOpenTopUp,
   onOpenTransactions,
   onOpenAdmin,
@@ -16,19 +14,8 @@ export default function SettingsView({
   emailVerified,
   onResendVerification,
 }) {
-  const [selectedLanguage, setSelectedLanguage] = useState('English');
-  const [isSyncing, setIsSyncing] = useState(false);
-
   const storeName = profile?.storeName || 'My Store';
-  const city      = profile?.city      || 'Delhi';
-
-  const triggerSync = () => {
-    setIsSyncing(true);
-    setTimeout(() => {
-      setIsSyncing(false);
-      alert('Your catalogue is stored securely in the cloud and stays in sync automatically.');
-    }, 1500);
-  };
+  const city      = profile?.city      || '';
 
   return (
     <div className="settings-view">
@@ -58,7 +45,7 @@ export default function SettingsView({
             {storeName}
           </div>
           <div style={{ fontSize: '0.72rem', opacity: 0.7 }}>
-            B2B Vendor Tier • {city}, India
+            B2B Vendor Tier{city ? ` • ${city}, India` : ''}
           </div>
         </div>
         <span className={`plan-chip ${wallet?.plan === 'PRO' ? 'pro' : 'free'}`}>
@@ -69,75 +56,6 @@ export default function SettingsView({
       {/* Credits & Wallet */}
       <WalletCard wallet={wallet} onOpenTopUp={onOpenTopUp} onOpenTransactions={onOpenTransactions} />
 
-      {/* Language / Localization */}
-      <div className="settings-section-card">
-        <div className="settings-section-title">Localization</div>
-        <div className="settings-item">
-          <div>
-            <div className="settings-item-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Globe size={14} /> Shop Language
-            </div>
-            <div className="settings-item-sub">Select Hindi, English or regional languages</div>
-          </div>
-          <div className="settings-item-control">
-            <select
-              className="settings-select"
-              value={selectedLanguage}
-              onChange={(e) => setSelectedLanguage(e.target.value)}
-            >
-              <option value="English">English</option>
-              <option value="Hindi">हिंदी (Hindi)</option>
-              <option value="Hinglish">Hinglish</option>
-              <option value="Tamil">தமிழ் (Tamil)</option>
-              <option value="Bengali">বাংলা (Bengali)</option>
-            </select>
-          </div>
-        </div>
-      </div>
-
-      {/* Optimization Mode */}
-      <div className="settings-section-card">
-        <div className="settings-section-title">Device Optimizer</div>
-
-        <div className="settings-item">
-          <div>
-            <div className="settings-item-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <Cpu size={14} /> Lightweight Mode
-            </div>
-            <div className="settings-item-sub">Reduces glass blur effects to run faster on budget phones</div>
-          </div>
-          <div className="settings-item-control">
-            <div
-              className={`settings-toggle ${lightweightMode ? 'active' : ''}`}
-              onClick={() => setLightweightMode(!lightweightMode)}
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Mobile App Sync */}
-      <div className="settings-section-card">
-        <div className="settings-section-title">Mobile App Sync</div>
-
-        <div className="settings-item">
-          <div>
-            <div className="settings-item-label">Cloud Sync</div>
-            <div className="settings-item-sub">Your catalogue & credits live in the cloud — always in sync</div>
-          </div>
-          <div className="settings-item-control">
-            <button
-              className="btn-ai-wizard primary"
-              style={{ padding: '6px 12px', fontSize: '0.72rem', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '4px' }}
-              onClick={triggerSync}
-              disabled={isSyncing}
-            >
-              <RefreshCw size={12} className={isSyncing ? 'ai-spinner' : ''} style={isSyncing ? { width: '12px', height: '12px', animation: 'spin 1s infinite linear' } : {}} />
-              {isSyncing ? 'Syncing...' : 'Sync Now'}
-            </button>
-          </div>
-        </div>
-      </div>
-
       {/* Account — Admin Console is visible only to authorized admins */}
       <div className="settings-section-card">
         <div className="settings-section-title">Account</div>
@@ -145,9 +63,9 @@ export default function SettingsView({
         {isAdmin && (
           <div className="settings-item" onClick={onOpenAdmin} style={{ cursor: 'pointer' }}>
             <div className="settings-item-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <ShieldCheck size={14} /> Admin Console
+              <ShieldCheck size={14} /> Owner Console
             </div>
-            <div style={{ fontSize: '0.72rem', opacity: 0.5 }}>Gift credits, manage stores →</div>
+            <div style={{ fontSize: '0.72rem', opacity: 0.5 }}>Passcode-locked · credits, banners, jobs →</div>
           </div>
         )}
 
@@ -182,23 +100,62 @@ export default function SettingsView({
         </div>
       </div>
 
-      {/* Support / Help */}
+      {/* Help & Legal — the policies open on their own pages (sample content
+          for now; swap in the final lawyer-approved text when ready) */}
       <div className="settings-section-card">
         <div className="settings-section-title">Help & Legal</div>
 
-        <div className="settings-item" onClick={() => alert("Redirecting to help center...")} style={{ cursor: 'pointer' }}>
+        <a
+          className="settings-item"
+          href="https://wa.me/919718282638"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}
+        >
           <div className="settings-item-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <HelpCircle size={14} /> Support & Guide
           </div>
-          <div style={{ fontSize: '0.72rem', opacity: 0.5 }}>→</div>
-        </div>
+          <div style={{ fontSize: '0.72rem', opacity: 0.5 }}>WhatsApp us →</div>
+        </a>
 
-        <div className="settings-item" onClick={() => alert("Your account is protected by Firebase Authentication. Your catalogue and credits are stored securely in the cloud — only your account can access them.")} style={{ cursor: 'pointer' }}>
+        <a
+          className="settings-item"
+          href="/terms"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}
+        >
           <div className="settings-item-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Shield size={14} /> Privacy & Data
+            <FileText size={14} /> Terms & Conditions
           </div>
-          <div style={{ fontSize: '0.72rem', opacity: 0.5 }}>→</div>
-        </div>
+          <div style={{ fontSize: '0.72rem', opacity: 0.5 }}>Open →</div>
+        </a>
+
+        <a
+          className="settings-item"
+          href="/privacy"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}
+        >
+          <div className="settings-item-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Shield size={14} /> Privacy Policy
+          </div>
+          <div style={{ fontSize: '0.72rem', opacity: 0.5 }}>Open →</div>
+        </a>
+
+        <a
+          className="settings-item"
+          href="/data"
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}
+        >
+          <div className="settings-item-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Shield size={14} /> Data Policy
+          </div>
+          <div style={{ fontSize: '0.72rem', opacity: 0.5 }}>Open →</div>
+        </a>
       </div>
     </div>
   );

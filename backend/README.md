@@ -18,10 +18,10 @@
 | Credits | `GET /stores/:id/credits`, `…/credits/ledger`, `GET /credits/packs` | balance + plan + pricing |
 | Orders | `POST /credits/orders` | Razorpay order (501 until real keys are in Secret Manager) |
 | Webhook | `POST /webhooks/razorpay` | HMAC-SHA256 signature over raw body; exactly-once by payment id |
-| Jobs | `POST /jobs`, `GET /jobs/:id`, `GET /jobs` | credit reservation + queued-job quota + Cloud Tasks enqueue (stub worker) |
-| Worker | `POST /workers/run-job` | Cloud Tasks OIDC/shared-secret gated stub — AI pipeline plugs in here later |
+| Jobs | `POST /jobs`, `GET /jobs/:id`, `GET /jobs` | credit reservation + queued-job quota + Cloud Tasks enqueue |
+| Worker | `POST /workers/run-job` | Cloud Tasks OIDC/shared-secret gated — runs the Vertex AI engine (Nano Banana 2 Lite + Gemini text) |
 | Notifications | `GET/POST /stores/:id/notifications` | low-balance follow-ups dedupe into `admin_alerts` |
-| Admin | `POST /admin/credits`, `GET /admin/follow-ups`, `POST …/:id/resolve` | gated by `ADMIN_EMAILS` allowlist |
+| Admin | `POST /admin/credits`, `GET /admin/follow-ups`, `POST …/:id/resolve` | Owner Console: `OWNER_EMAIL` + passcode-issued session |
 
 ## Security posture (the black box)
 
@@ -33,7 +33,7 @@
   control-char stripping, allowlists, and **whitelisted keys only** (prototype-pollution safe).
 - **Ledger:** Firestore transactions + idempotency keys (`credit_ops/{key}`) = exactly-once
   reserve/grant/refund — retries and doubled webhooks can never double-charge.
-- **Secrets:** Razorpay keys via `--set-secrets` from Secret Manager; `ADMIN_EMAILS` from
+- **Secrets:** Razorpay keys via `--set-secrets` from Secret Manager; `OWNER_EMAIL` from
   deploy env. Nothing sensitive ships in the image or the repo.
 - **Errors:** uniform `{ok, error:{code,message}}`; stack traces logged server-side only.
 - helmet() headers, strict CORS allowlist, 256 KB body cap, raw-body webhook signing.
@@ -66,7 +66,7 @@ gcloud run deploy katalogit-api --source . --region asia-south1 \
   --no-allow-unauthenticated --min-instances 0 --max-instances 2 \
   --memory 512Mi --cpu 1 \
   --service-account katalogit-api-runner@katalogitai-501916.iam.gserviceaccount.com \
-  --set-env-vars "^|^FIREBASE_PROJECT_ID=katalogitai-501916|ADMIN_EMAILS=<you>@gmail.com|CORS_ORIGIN=<frontend origins>" \
+  --set-env-vars "^|^FIREBASE_PROJECT_ID=katalogitai-501916|OWNER_EMAIL=<you>@gmail.com|CORS_ORIGIN=<frontend origins>" \
   --set-secrets "RAZORPAY_KEY_ID=razorpay-key:latest,RAZORPAY_KEY_SECRET=razorpay-key:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook:latest"
 ```
 

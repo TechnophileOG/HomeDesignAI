@@ -7,43 +7,12 @@
        const { status, job } = await ai.pollJob(job.id, onStage);
 
    The backend ATOMICALLY reserves credits on job creation (a client can never
-   spend without paying) and runs the pipeline on the GPU box when configured.
-   Until the GPU worker is live, jobs stay 'queued' — the UI reports this
-   honestly instead of faking results.
+   spend without paying) and renders via the managed Vertex AI engine once
+   VERTEX_AI_LOCATION is configured. Until then jobs stay 'queued' — the UI
+   reports this honestly instead of faking results.
    ════════════════════════════════════════════════════════════════════════════ */
 
 import { api } from './client';
-
-/* ── Job types (match backend pricing + Firestore job.type) ──────────────── */
-export const JOB_TYPES = {
-  model_shoot: 'model_shoot',
-  regen_shot:  'regen_shot',
-  full_regen:  'full_regen',
-  retake:      'retake',
-};
-
-export const JOB_CREDITS = {
-  model_shoot: 3,
-  regen_shot:  1,
-  full_regen:  3,
-  retake:      0,
-};
-
-/* ── Pipeline stages surfaced as progress messages ────────────────────────── */
-export const PIPELINE_STAGES = [
-  'Analysing fabric texture…',
-  'Detecting product category…',
-  'Writing title & description…',
-  'Setting price estimate…',
-  'Generating model photoshoot…',
-  'Finalising high-res renders…',
-];
-
-/* ── Model roster (mirrors AIModelWizard) ─────────────────────────────────── */
-export const MODEL_ROSTER = [
-  { id: 'm1', name: 'Aarav',  gender: 'Male',   avatar: '/assets/model_male.png',   desc: 'Professional studio lighting, warm skin tone' },
-  { id: 'm2', name: 'Ananya', gender: 'Female', avatar: '/assets/model_female.png', desc: 'Elegant editorial pose, pastel background matching' },
-];
 
 /* ════════════════════════════════════════════════════════════════════════════
    Public pipeline — the only surface the UI touches.

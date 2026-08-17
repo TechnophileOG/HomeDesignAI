@@ -18,9 +18,14 @@ import { renderPack } from './platform-templates.js';
 /** The platforms we can export a listing file for. */
 export const EXPORT_PLATFORMS = ['amazon', 'flipkart', 'meesho', 'myntra', 'alibaba'];
 
-/** One CSV cell — strip control chars, quote when it needs quoting. */
+/** One CSV cell — strip control chars, quote when it needs quoting.
+    Formula-injection guard: a cell beginning with = + - @ (or tab/CR) is
+    treated as a formula by Excel/Sheets. Product titles are seller-controlled
+    text that lands in these files, so we neutralise the trigger prefix with
+    a leading apostrophe — the cell shows the literal text, never executes. */
 const csvCell = (v) => {
-  const s = String(v ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+  let s = String(v ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 

@@ -6,11 +6,12 @@
 > approves, and exports catalogue images for Flipkart/Meesho/Instagram.
 >
 > Status: **production-wired.** Real Firebase Auth, real Cloud Run API, real
-> Firestore ledger, real GCS storage. The only intentionally-deferred piece is
-> the GPU box (the AI model itself) — every layer around it is live and tested.
+> Firestore ledger, real GCS storage, real AI jobs via the managed Vertex AI
+> engine (Nano Banana 2 Lite images + Gemini text) once `VERTEX_AI_LOCATION`
+> is set on Cloud Run.
 >
 > Companion docs: `BACKEND_ARCHITECTURE.md` (design rationale), `GCP_SETUP_GUIDE.md`
-> (operations), `AI_PIPELINE_PLAN.md` (model choice), `backend/ai/AI_WORKER.md`.
+> (operations), `MODEL_DECISION.md` (model choice + licensing), `PLATFORM_SEO_PLAYBOOK.md`.
 
 ---
 
@@ -20,10 +21,11 @@
 
 A store owner signs up with email/password (Firebase Auth), completes onboarding,
 gets a wallet of free credits, photographs garments, and pays **credits** to queue
-AI jobs. A stateless GPU box renders the photos, the results land back on the
-product, the seller approves them into a live catalogue, and can top up credits
-with Razorpay. Admins (an email allowlist) can gift credits, review the global
-ledger, and see low-balance follow-up alerts.
+AI jobs. A managed Vertex AI image model (Nano Banana 2 Lite) renders the posed
+photos, the results land back on the product, the seller approves them into a
+live catalogue, and can top up credits with Razorpay. The owner (OWNER_EMAIL +
+passcode) can gift credits, review the global ledger, and see low-balance
+follow-up alerts.
 
 ### 1.2 Architecture diagram
 
@@ -56,10 +58,10 @@ ledger, and see low-balance follow-up alerts.
                               │           │           │
                               ▼           ▼           ▼
                      ┌────────────────────────────────────────┐
-                     │  AI worker (future GPU box, optional)  │
-                     │  FastAPI + diffusers + IP-Adapter +    │
-                     │  OpenPose ControlNet — receives ONLY   │
-                     │  short-lived signed URLs + secret      │
+                     │  Vertex AI (managed, via Cloud Tasks   │
+                     │  worker) — Nano Banana 2 Lite, text    │
+                     │  via Gemini Flash-Lite. No GPU to      │
+                     │  run or secure; billed per image.      │
                      └────────────────────────────────────────┘
 ```
 
@@ -75,10 +77,10 @@ ledger, and see low-balance follow-up alerts.
 | **Credit ledger** | Firestore transactions | wallets + append-only ledger, exactly-once | ✅ live |
 | **Photo storage** | Cloud Storage (2 buckets) | originals (private) + processed (public-read, unlistable) | ✅ live |
 | **Payments** | Razorpay | Credit top-ups: orders + signature-verified webhook | ✅ wired (keys pending) |
-| **Async queue** | Cloud Tasks (`ai-jobs`) | At-least-once job delivery to the worker | ✅ created |
-| **AI worker** | FastAPI + diffusers (GPU box) | Flat-lay → 8 posed model photos | ⏳ model deferred |
+| **Async queue** | Cloud Tasks (`ai-jobs`) | At-least-once job delivery to the engine | ✅ created |
+| **AI engine** | Vertex AI managed API | Flat-lay → 8 posed model photos + listing text | ✅ wired (needs `VERTEX_AI_LOCATION`) |
 | **Secrets** | Secret Manager | Razorpay keys, worker secrets | ✅ |
-| **Admin console** | Inside web app (`AdminPanel`) | Gift credits, global ledger, follow-ups — ADMIN_EMAILS-gated | ✅ |
+| **Owner console** | Inside web app (`AdminPanel`) | Gift credits, global ledger, follow-ups — OWNER_EMAIL + passcode session | ✅ |
 
 ### 1.4 Key architectural decisions (and why)
 
@@ -94,15 +96,15 @@ ledger, and see low-balance follow-up alerts.
 3. **Signed URLs instead of server-side upload proxying.** The API issues 15-min
    V4 signed PUT URLs; the browser uploads straight to GCS. No bandwidth through
    Cloud Run, no file buffering, no credential exposure.
-4. **The GPU box is credential-free.** The API signs short-lived GET (garment) +
-   PUT (outputs) URLs and sends only those + prompt config + a shared secret.
-   The box cannot mint URLs, read other stores' photos, or touch wallets.
+4. **Managed AI, no GPU to secure.** Jobs run on Vertex AI (Nano Banana 2
+   Lite for images, Gemini Flash-Lite for text) — billed per image, no box to
+   harden, no secrets to leak. The worker route verifies Cloud Tasks OIDC
+   tokens (audience = WORKER_URL) or the shared secret before doing anything.
 5. **Deterministic AI output.** Seed = FNV-1a(storeId:productId:poseId) + fixed
-   model roster + IP-Adapter garment lock → same product renders identically on
-   every retry (no "fresh request = fresh random quality").
-6. **Licensing is a business constraint.** Only commercial-safe models
-   (Realistic Vision OpenRAIL-M, IP-Adapter Apache-2.0, OpenPose ControlNet
-   OpenRAIL-M). IDM-VTON/CatVTON/OOTDiffusion are all non-commercial → excluded.
+   model + fixed pose prompts → the same product renders consistently on retry.
+6. **Licensing is a business constraint.** Managed Google models are
+   commercial-safe by default. Self-hosted VTON stacks (IDM-VTON/CatVTON/
+   OOTDiffusion) stay excluded — non-commercial licenses.
 
 ### 1.5 Data flows (the important journeys)
 
@@ -111,8 +113,8 @@ ledger, and see low-balance follow-up alerts.
 Sign up (Firebase) → GET /me (server derives store-{uid8}, returns onboarded:false)
 → OnboardingFlow → POST /stores (creates store + grants welcome credits exactly once)
 → AddProductFlow: camera → data URL → POST /uploads/urls → PUT to GCS → POST /products
-→ POST /jobs (reserves 3 credits atomically) → job queued
-→ (GPU live) worker renders 8 poses → gallery written to product → job done
+→ POST /jobs (reserves 3 credits atomically) → job queued → Cloud Tasks worker
+→ Vertex AI renders 8 poses → gallery written to product → job done
 → ReviewCenter: approve → product live → visible in Catalogue
 ```
 
@@ -137,7 +139,7 @@ TopUpModal → POST /credits/orders → Razorpay order (pack price in paise)
 **D. Admin gifting**
 ```
 AdminPanel (only renders for isAdmin) → POST /admin/credits {storeId|email, amount, note}
-→ requireAdmin (ADMIN_EMAILS allowlist from deploy env) → grant/refund idempotent
+→ requireAdmin (OWNER_EMAIL + passcode-issued short-lived session) → grant/refund idempotent
 → visible in GET /admin/stores + GET /admin/ledger (global mirror stream)
 ```
 
@@ -176,7 +178,7 @@ AdminPanel (only renders for isAdmin) → POST /admin/credits {storeId|email, am
 | GCS | ~$0.02/GB/mo; public-read only on processed |
 | Cloud Tasks / Secret Manager | $0 within free tier |
 | Razorpay | per-transaction fee |
-| GPU (later) | rented spot 4090/3090 — ~$0.03–0.08 per 8-pose shoot |
+| Vertex AI images | ~$0.034/image (Batch API ≈ half); text ~$0.001 |
 | **Monthly target** | **~$0–3 until real traffic** |
 
 ---
@@ -189,7 +191,7 @@ AdminPanel (only renders for isAdmin) → POST /admin/credits {storeId|email, am
 backend/
   src/
     server.js        entrypoint — helmet, CORS, body cap, route mounting, /ping
-    config.js        env → config (CORS_ORIGIN, ADMIN_EMAILS, pricing, packs, secrets)
+    config.js        env → config (CORS_ORIGIN, OWNER_EMAIL, ADMIN_PASSCODE, pricing, packs, secrets)
     auth.js          verifyIdToken (OAuth2Client) + requireAuth + requireAdmin
     db.js            Firestore singleton + collection refs + snap()
     ledger.js        grantCredits / reserveCredits / refundCredits / listLedger
@@ -200,17 +202,18 @@ backend/
                      jobCreate, orderCreate, adminAdjust
     errors.js        AppError + handlers (uniform JSON, no leaks)
     rate-limit.js    globalLimiter + userLimiter factory
-    ai-client.js     buildPrompt (sanitized), submitGpuJob, pollGpuJob, fnv1a, POSE_LIST
+    ai-client.js     buildPrompt (sanitized), promptSafe, fnv1a, POSE_LIST
+    ai-fallback.js   generateWithVertexAi — managed image render (single engine)
+    ai-text.js       generateListingText — Gemini listing/SEO copy (best-effort)
     routes/
       core.js        /me, /stores CRUD, /products CRUD, /uploads/urls, /notifications
       credits.js     /credits, /credits/ledger, /credits/packs, /credits/orders,
                      /webhooks/razorpay, /admin/stores, /admin/ledger, /admin/credits,
-                     /admin/follow-ups
-      jobs.js        /jobs POST (quota→reserve→record→enqueue), GET /jobs, GET /jobs/:id,
-                     /workers/run-job (atomic claim, GPU orchestration, refund on fail)
+                     /admin/follow-ups      jobs.js       /jobs POST (quota→reserve→record→enqueue), GET /jobs, GET /jobs/:id,
+                     /workers/run-job (atomic claim, Vertex AI render, refund on fail)
       owners.js      requireStoreOwner (ownership guard, 404 on foreign)
   test/smoke.mjs     17 checks — ledger idempotency/atomicity + HTTP black-box
-  ai/                poses.json, poses/, gpu_worker/worker.py, test-orchestrator.mjs
+  ai/                poses.json + poses/ (pose reference images for prompts)
 ```
 
 ### 2.2 Firestore data model (actual, live)
@@ -283,7 +286,7 @@ Idempotency keys in use: `signup:{uid}` (welcome grant), `job:{jobId}` (reserve)
 | POST | `/webhooks/razorpay` | HMAC | signature-verified, exactly-once top-up |
 | POST | `/jobs` | owner + 20/hr | quota → atomic reserve → record → enqueue |
 | GET | `/jobs`, `/jobs/:id` | owner | list / poll |
-| POST | `/workers/run-job` | OIDC/secret | atomic claim → GPU → settle/refund |
+| POST | `/workers/run-job` | OIDC/secret | atomic claim → Vertex AI render → settle/refund |
 | GET | `/admin/stores`, `/admin/ledger` | **admin** | allowlist-gated |
 | POST | `/admin/credits` | **admin** | gift/reverse by storeId or email |
 | GET/POST | `/admin/follow-ups[/:id/resolve]` | **admin** | team queue |
@@ -291,7 +294,7 @@ Idempotency keys in use: `signup:{uid}` (welcome grant), `job:{jobId}` (reserve)
 Response envelope: `{ ok:true, data }` | `{ ok:false, error:{ code, message } }`.
 Codes: 400 INVALID_FIELD / 401 UNAUTHORIZED / 402 INSUFFICIENT_CREDITS /
 403 FORBIDDEN / 404 NOT_FOUND / 409 STORE_CONFLICT / 413 PAYLOAD_TOO_LARGE /
-429 RATE_LIMITED / 501 not-configured / 502 GPU_SUBMIT_FAILED / 504 GPU_TIMEOUT.
+429 RATE_LIMITED / 501 not-configured / 502 VERTEX_FAILED / 504 TIMEOUT.
 
 ### 2.5 Frontend file map
 
@@ -338,16 +341,16 @@ POST /jobs
  4. write Firestore job (queued)
  5. enqueue Cloud Tasks (tolerant — failure is non-fatal)
 
-worker POST /run-job (OIDC or shared secret)
+worker POST /run-job (verified OIDC token or shared secret)
  1. atomic claim: tx reads job; terminal states (done/failed) → return duplicate;
     else → status='processing'  (a crash lets the next retry re-claim)
- 2. GPU unconfigured → revert to 'queued' (honest stub; credits stay reserved)
+ 2. Vertex AI unconfigured → revert to 'queued' (honest stub; credits stay reserved)
  3. product missing → 'failed' + refundCredits(refund:{jobId})
- 4. submitGpuJob: sign garment GET url + 8 output PUT urls, POST {jobId, prompt,
-    garmentUrl, poses[{poseId,index,prompt,seed,outputUrl}]} to GPU_HOST/run
-    (submit failure → revert to queued, let Cloud Tasks retry with backoff)
- 5. pollGpuJob until done/failed (8 min budget)
- 6. timeout/failed → job 'failed' + refundCredits(refund:{jobId})
+ 4. text pass: generateListingText (Gemini) — fills aiSpecs + placeholder title,
+    best-effort, never fails the job
+ 5. generateWithVertexAi: managed render of 8 poses for the garment
+ 6. failure → job 'failed' + refundCredits(refund:{jobId}); stale 'processing'
+    (> STALE_JOB_MS) also fails + refunds so nothing hangs forever
  7. success → append output paths to product.gallery (deduped), job 'done'
     (gallery written BEFORE done so a crash between them can't lose renders)
 ```
@@ -359,7 +362,7 @@ worker POST /run-job (OIDC or shared secret)
 - **Credits**: every mutation goes through the API; the UI *displays* the wallet
   and opens TopUp on `402/INSUFFICIENT_CREDITS`. Client-side `CREDIT_PRICING` is
   display-only — the server is the source of truth.
-- **isAdmin** is decided by the server (`GET /me` merges ADMIN_EMAILS result into
+- **isAdmin** is decided by the server (`GET /me` checks OWNER_EMAIL match;
   the session); the client only gates rendering.
 - **Low-balance UX**: `LOW_BALANCE_SHOOT_THRESHOLD = 3` shoots → if
   `balance < 3 × 3` the AddProductFlow warns the user; if they proceed and hit 402,
@@ -378,7 +381,7 @@ worker POST /run-job (OIDC or shared secret)
 - [x] 256 KB body cap; malformed JSON → clean 400
 - [x] Rate limits: global 600/15min/IP + jobs 20/hr/user + orders 10/hr/user
 - [x] Razorpay webhook: HMAC over raw body, timing-safe compare, event dedupe
-- [x] Admin routes: ADMIN_EMAILS allowlist (env), never client-supplied
+- [x] Admin routes: OWNER_EMAIL + passcode-issued session (env), never client-supplied
 - [x] GCS: public-access-prevention removed ONLY on processed bucket for browser
       display (objects unlistable, paths unguessable); originals stay private
 - [x] CSP injected in prod build + `vercel.json` headers; frame-ancestors 'none'
@@ -389,7 +392,7 @@ worker POST /run-job (OIDC or shared secret)
 1. **Firebase Auth providers** — ensure Email/Password is enabled in the console
    (the account flow is coded; console switch is the only user-side blocker).
 2. **Razorpay keys** → Secret Manager (test keys to start; the flow is wired).
-3. **GPU box** — deploy `backend/ai/gpu_worker` on a rented GPU, set
-   `GPU_HOST_URL` + `GPU_AUTH_TOKEN` on Cloud Run; jobs then actually render.
+3. **Vertex AI** — set `VERTEX_AI_LOCATION` (e.g. `global` or `asia-south1`)
+   on Cloud Run; the managed image + text engines then render real jobs.
 4. **Custom domain** — map `katalogit.ai` → hosting/CDN for the frontend.
 5. **Monitoring** — uptime check on `/ping`, error alerts on Cloud Run logs.

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Home, BarChart2, Settings, Sparkles, Bell, User, TrendingUp, ClipboardCheck, MailCheck } from 'lucide-react';
+import { Home, BarChart2, Settings, Bell, User, TrendingUp, ClipboardCheck, MailCheck } from 'lucide-react';
 import './App.css';
 
 import BannerCarousel     from './components/BannerCarousel';
@@ -14,6 +14,10 @@ import OnboardingFlow     from './components/OnboardingFlow';
 import KatalogitPreloader from './components/KatalogitPreloader';
 import AdminPanel         from './components/AdminPanel';
 import AuthGate           from './components/AuthGate';
+import AdminUnlockModal   from './components/AdminUnlockModal';
+import ResetPasswordView  from './components/ResetPasswordView';
+import JoinSessionView    from './components/JoinSessionView';
+import KatalogitLogo      from './components/KatalogitLogo';
 import { TopUpModal, TransactionsModal } from './components/CreditsWallet';
 import { api, getCurrentStoreId, dataUrlToBlob, CREDIT_PRICING } from './api/client';
 import { auth } from './api/auth';
@@ -38,7 +42,6 @@ const storeToProfile = (s) => ({
 
 export default function App() {
   const [activeTab, setActiveTab]           = useState('Home');
-  const [lightweightMode, setLightweightMode] = useState(false);
   const [searchQuery, setSearchQuery]       = useState('');
   const [showNotifications, setShowNotifications] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -49,6 +52,12 @@ export default function App() {
   const [storeProfile, setStoreProfile]     = useState(null);
   // KatalogitAI intro animation — plays on every page load
   const [showPreloader, setShowPreloader]   = useState(true);
+  // "Real" preloader: the animation leaves only when the app behind is ready
+  // (fonts loaded + session checked) — never a fixed timer, never stuck.
+  const [fontsReady, setFontsReady] = useState(false);
+
+  // Password-reset link handling (mode=resetPassword&oobCode=… from the email)
+  const [resetFlow, setResetFlow] = useState(null);
 
   // Auth gate — the app stays closed until a valid session exists
   const [authed, setAuthed]       = useState(false);
@@ -69,18 +78,64 @@ export default function App() {
   const [adminLedger, setAdminLedger] = useState([]);  // global ledger (admins)
   const [alerts, setAlerts]       = useState([]); // admin follow-up queue
   const [leads, setLeads]         = useState([]); // admin leads (contact form)
+  const [adminJobs, setAdminJobs] = useState([]); // admin: jobs across stores
+  const [adminOrders, setAdminOrders] = useState([]); // admin: payments
   const [showTopUp, setShowTopUp]       = useState(false);
   const [showTransactions, setShowTransactions] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [showAdminUnlock, setShowAdminUnlock] = useState(false);
+  // Live cataloging sessions (bulk mode) — surfaced in the Review Center.
+  const [sessions, setSessions]         = useState([]);
+  const [resumeSessionId, setResumeSessionId] = useState(null);
 
-  /* ── Session check — nothing renders until auth is verified ───────────── */
+  // Admin-controlled content (banners + announcements) — server is truth.
+  const [banners, setBanners]             = useState([]);
+  const [announcements, setAnnouncements] = useState([]);
+  const [adminBanners, setAdminBanners]       = useState([]);
+  const [adminAnnouncements, setAdminAnnouncements] = useState([]);
+  const DISMISS_KEY = 'kat_dismissed_announcements_v1';
+  const [dismissed, setDismissed] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]'); } catch { return []; }
+  });
+  const dismissAnnouncement = (id) => {
+    const next = dismissed.includes(id) ? dismissed : [...dismissed, id];
+    setDismissed(next);
+    try { localStorage.setItem(DISMISS_KEY, JSON.stringify(next)); } catch { /* noop */ }
+  };
+
+  /* ── Session check — nothing renders until auth is verified. NEVER leaves
+     the boot spinner: any failure falls back to the auth gate instead of
+     hanging (a hang here was a real bug — a thrown getSession() left
+     authChecked=false forever, a permanent loading screen). ───────────── */
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const ok = await auth.hasSession();
-      const s  = ok ? await api.getSession() : null;
+      let ok = false;
+      let s = null;
+      try {
+        ok = await auth.hasSession();
+        s  = ok ? await api.getSession() : null;
+      } catch (err) {
+        console.error('[app] session check failed:', err);
+        ok = false; // cannot verify → auth gate (never a stuck spinner)
+      }
       if (mounted) { setSession(s); setAuthed(ok); setAuthChecked(true); }
     })();
+    return () => { mounted = false; };
+  }, []);
+
+  // Fonts + password-reset link detection — the preloader waits for fonts so
+  // the reveal underneath always paints text correctly (no invisible-text FOIT).
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try { await (document.fonts ? document.fonts.ready : Promise.resolve()); } catch { /* ignore */ }
+      if (mounted) setFontsReady(true);
+    })();
+    const q = new URLSearchParams(window.location.search);
+    if (q.get('mode') === 'resetPassword' && q.get('oobCode')) {
+      setResetFlow({ oobCode: q.get('oobCode'), apiKey: q.get('apiKey') || '' });
+    }
     return () => { mounted = false; };
   }, []);
 
@@ -104,6 +159,19 @@ export default function App() {
         setAdminLedger(b.isAdmin ? await api.adminGetLedger().catch(() => []) : []);
         setAlerts(b.alerts);
         setLeads(b.isAdmin ? b.leads : []);
+        // Live cataloging sessions + admin-controlled content
+        setSessions(await api.listSessions().catch(() => []));
+        setBanners(await api.getBanners().catch(() => []));
+        setAnnouncements(await api.getAnnouncements().catch(() => []));
+        // Owner console data loads ONLY when the owner holds a valid unlock
+        // session — never on email alone. After unlock we refresh via
+        // handleAdminUnlocked().
+        if (b.isAdmin && api.hasAdminSession()) {
+          setAdminBanners(await api.adminListBanners().catch(() => []));
+          setAdminAnnouncements(await api.adminListAnnouncements().catch(() => []));
+          setAdminJobs(await api.adminGetJobs().catch(() => []));
+          setAdminOrders(await api.adminGetOrders().catch(() => []));
+        }
       } catch (err) {
         console.error('[app] bootstrap failed:', err);
         if (err.status === 401 || err.code === 'NETWORK') {
@@ -118,17 +186,17 @@ export default function App() {
 
   const storeId = getCurrentStoreId();
 
+  // The onboarding finale calls this and AWAITS it: throws on failure so the
+  // finale can show a real error + retry instead of silently passing. The
+  // final onboardingDone flip happens via onDone (from the success screen) so
+  // the confirmation is seen before the app reveals.
   const handleOnboardingComplete = async (profileData) => {
-    try {
-      const { store, wallet: w } = await api.onboard(profileData);
-      setStoreProfile(storeToProfile(store));
-      setOnboardingDone(true);
-      setWallet({ id: store.id, balance: w.balance, plan: w.plan });
-      setStores([{ id: store.id, storeName: store.name, city: store.city, plan: String(w.plan || 'free').toUpperCase(), balance: w.balance, lastActive: new Date().toISOString() }]);
-      setLedger(await api.getLedger().catch(() => []));
-    } catch (err) {
-      console.error('[onboard] failed:', err);
-    }
+    const { store, wallet: w } = await api.onboard(profileData);
+    setStoreProfile(storeToProfile(store));
+    setWallet({ id: store.id, balance: w.balance, plan: w.plan });
+    setStores([{ id: store.id, storeName: store.name, city: store.city, plan: String(w.plan || 'free').toUpperCase(), balance: w.balance, lastActive: new Date().toISOString() }]);
+    setLedger(await api.getLedger().catch(() => []));
+    return { store, wallet: w };
   };
 
   /* ── Upload a captured photo to GCS via signed URL → object path ──────── */
@@ -152,37 +220,65 @@ export default function App() {
 
   /* ── Photo shoot complete: upload photos → create product → queue AI job.
      Not enough credits? The product is saved as a DRAFT (server-side) so the
-     photos are never lost — the user recharges and generates later. ─────── */
-  const handleShootComplete = async (items) => {
+     photos are never lost — the user recharges and generates later.
+     opts.hold (user chose to wait for the proprietary model): photos are
+     saved as drafts with NO job and NO credit charge — the moment the
+     proprietary pipeline is online, drafts generate from Review Center.
+     NEVER throws: returns { status, saved[], failed[] } so the caller can
+     mark each photo as cloud-saved or keep it cached on-device for retry. */
+  const handleShootComplete = async (items, opts = {}) => {
     const list = Array.isArray(items) ? items : [items];
+    const saved = [];
+    const failed = [];
     let anyQueued = false;
     let anyDraft = false;
     for (const it of list) {
       if (!it || !it.front) continue;
+      const marker = { front: it.front, back: it.back || null };
       try {
-        const flatLay = await uploadPhoto(it.front);
-        const product = await api.createProduct({
-          title: 'Product photo', category: 'Apparel', status: 'pending_approve', flatLay,
-        });
-        try {
-          await api.createJob({ type: 'model_shoot', productId: product.id });
-          anyQueued = true;
-        } catch (err) {
-          if (err.code === 'INSUFFICIENT_CREDITS' || err.status === 402) {
-            await api.patchProduct(product.id, { status: 'draft' });
-            anyDraft = true;
-          } else {
-            throw err;
+        // Live-session captures are ALREADY in GCS (stores/{storeId}/sessions/…)
+        // — reference the path directly instead of re-uploading. Local captures
+        // upload via a signed URL as before.
+        const flatLay = it.path
+          ? { path: it.path, contentType: it.mime || 'image/jpeg', size: it.size || 0 }
+          : await uploadPhoto(it.front);
+        if (opts.hold) {
+          // Held: no job, no credits — the proprietary model generates later.
+          await api.createProduct({
+            title: 'Product photo', category: 'Apparel', status: 'draft',
+            flatLay,
+            note: 'Held — awaiting the proprietary Katalogit AI model.',
+          });
+          anyDraft = true;
+        } else {
+          const product = await api.createProduct({
+            title: 'Product photo', category: 'Apparel', status: 'pending_approve', flatLay,
+          });
+          try {
+            await api.createJob({ type: 'model_shoot', productId: product.id });
+            anyQueued = true;
+          } catch (err) {
+            if (err.code === 'INSUFFICIENT_CREDITS' || err.status === 402) {
+              await api.patchProduct(product.id, { status: 'draft' });
+              anyDraft = true;
+            } else {
+              throw err;
+            }
           }
         }
+        saved.push(marker); // reached the cloud (live or draft) — mark saved
       } catch (err) {
         console.error('[shoot] item failed:', err);
+        failed.push(marker); // stays in the local cache for retry
       }
     }
     const [w, pending] = await Promise.all([api.getWallet(), api.getPending()]);
     setWallet(w);
     setPendingReview(pending);
-    return { status: anyQueued ? 'success' : (anyDraft ? 'draft' : 'error') };
+    return {
+      status: opts.hold ? 'held' : (anyQueued ? 'success' : (anyDraft ? 'draft' : 'error')),
+      saved, failed,
+    };
   };
 
   /* ── Credits: top-up (Razorpay) — wait for the webhook to credit us ───── */
@@ -197,9 +293,51 @@ export default function App() {
     setLedger(await api.getLedger().catch(() => []));
   };
 
-  /* ── ROLE-GATED: only a session whose email is in the server's ADMIN_EMAILS
-     allowlist may gift credits or open the admin console. ───────────────── */
+  /* ── ROLE-GATED: only the OWNER (server-decided — email must be exactly
+     OWNER_EMAIL) sees the console entry; opening it additionally requires
+     the passcode-unlocked short-lived session. ─────────────────────────── */
   const isAdmin = Boolean(session?.isAdmin);
+
+  // Refresh every admin dataset after a successful unlock.
+  const refreshAdminData = async () => {
+    if (!isAdmin || !api.hasAdminSession()) return;
+    const [st, gl, al, ld, bn, an, jb, od] = await Promise.all([
+      api.adminGetStores().catch(() => []),
+      api.adminGetLedger().catch(() => []),
+      api.adminFollowUps().catch(() => []),
+      api.adminGetLeads().catch(() => []),
+      api.adminListBanners().catch(() => []),
+      api.adminListAnnouncements().catch(() => []),
+      api.adminGetJobs().catch(() => []),
+      api.adminGetOrders().catch(() => []),
+    ]);
+    setStores(st); setAdminLedger(gl); setAlerts(al); setLeads(ld);
+    setAdminBanners(bn); setAdminAnnouncements(an); setAdminJobs(jb); setAdminOrders(od);
+  };
+
+  // Opening the console: unlocked session → straight in; otherwise the
+  // passcode modal first. Deep-link ?admin=1 was REMOVED — no URL can open
+  // the console without the passcode.
+  const openAdminConsole = async () => {
+    if (!isAdmin) return;
+    if (api.hasAdminSession()) {
+      await refreshAdminData();
+      setShowAdmin(true);
+      return;
+    }
+    setShowAdminUnlock(true);
+  };
+
+  const handleAdminUnlocked = async () => {
+    setShowAdminUnlock(false);
+    await refreshAdminData();
+    setShowAdmin(true);
+  };
+
+  const handleAdminLock = () => {
+    api.adminLock();
+    setShowAdmin(false);
+  };
 
   const handleGift = async (store, amount, note) => {
     if (!isAdmin) return;
@@ -216,6 +354,38 @@ export default function App() {
     } catch (err) {
       alert(err.message || 'Gift failed.');
     }
+  };
+
+  /* ── Admin: publish/update/remove carousel banners + announcements ────── */
+  const handleSaveBanner = async (banner, id) => {
+    try {
+      if (id) await api.adminUpdateBanner(id, banner);
+      else await api.adminCreateBanner(banner);
+      setAdminBanners(await api.adminListBanners());
+      setBanners(await api.getBanners().catch(() => []));
+    } catch (err) { alert(err.message || 'Could not save banner.'); }
+  };
+  const handleDeleteBanner = async (id) => {
+    try {
+      await api.adminDeleteBanner(id);
+      setAdminBanners(await api.adminListBanners());
+      setBanners(await api.getBanners().catch(() => []));
+    } catch (err) { alert(err.message || 'Could not delete banner.'); }
+  };
+  const handleSaveAnnouncement = async (ann, id) => {
+    try {
+      if (id) await api.adminUpdateAnnouncement(id, ann);
+      else await api.adminCreateAnnouncement(ann);
+      setAdminAnnouncements(await api.adminListAnnouncements());
+      setAnnouncements(await api.getAnnouncements().catch(() => []));
+    } catch (err) { alert(err.message || 'Could not save announcement.'); }
+  };
+  const handleDeleteAnnouncement = async (id) => {
+    try {
+      await api.adminDeleteAnnouncement(id);
+      setAdminAnnouncements(await api.adminListAnnouncements());
+      setAnnouncements(await api.getAnnouncements().catch(() => []));
+    } catch (err) { alert(err.message || 'Could not delete announcement.'); }
   };
 
   /* ── Admin follow-up alerts (low balance → team nudges the store) ──────── */
@@ -235,6 +405,27 @@ export default function App() {
   const handleResolveLead = async (leadId) => {
     try { setLeads(await api.adminResolveLead(leadId)); } catch (err) { console.error(err); }
   };
+
+  /* ── Live cataloging sessions (bulk mode) ────────────────────────────── */
+  const refreshSessions = () => api.listSessions().then(setSessions).catch(() => {});
+  const handleCloseSession = async (id) => {
+    try {
+      await api.closeSession(id);
+      await refreshSessions();
+    } catch (err) { alert(err.message || 'Could not close the session.'); }
+  };
+  const handleResumeSession = (id) => {
+    setResumeSessionId(id); // AddProductFlow joins this session in bulk mode
+    setIsAddModalOpen(true);
+  };
+  // Live-ish refresh while the Review tab is open (cheap light list GET).
+  useEffect(() => {
+    if (activeTab !== 'Review') return;
+    refreshSessions();
+    const t = setInterval(refreshSessions, 6000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   /* ── Email verification (defense in depth — AuthGate gates entry, this
      banner covers already-onboarded / edge-case unverified sessions) ────── */
@@ -355,8 +546,19 @@ export default function App() {
   const pendingRetake  = pendingReview.filter(p => p.status === 'pending_retake');
   const pendingDraft   = pendingReview.filter(p => p.status === 'draft');
 
-  // Real notifications only — no fabricated demo messages
+  // Real notifications only — no fabricated demo messages. Server
+  // announcements (pushed by the admin) appear first and can be dismissed.
+  const announcementNotifs = announcements
+    .filter((a) => !dismissed.includes(a.id))
+    .slice(0, 5)
+    .map((a) => ({
+      id: `ann-${a.id}`,
+      text: a.message ? `${a.title} — ${a.message}` : a.title,
+      dismissable: true,
+      annId: a.id,
+    }));
   const notifications = [
+    ...announcementNotifs,
     ...(pendingApprove.length > 0 ? [{ id: 1, text: `${pendingApprove.length} product${pendingApprove.length !== 1 ? 's' : ''} waiting for approval.` }] : []),
     ...(pendingDraft.length > 0 ? [{ id: 2, text: `${pendingDraft.length} draft${pendingDraft.length !== 1 ? 's' : ''} waiting for credits to generate.` }] : []),
     // team-only follow-ups never surface to regular sellers
@@ -365,6 +567,36 @@ export default function App() {
       text: `Team follow-up: ${a.storeName} needs a recharge nudge (${a.balance} credits).`,
     })) : []),
   ];
+  const unreadAnnouncements = announcements.filter((a) => !dismissed.includes(a.id)).length;
+
+  // ── Live-session join page (scanning phone — NO account needed). The QR
+  //    links here with a one-time token; it must render BEFORE the auth gate.
+  const joinMatch = window.location.pathname.match(/\/join\/([A-Za-z0-9_-]+)$/);
+  if (joinMatch) {
+    const q = new URLSearchParams(window.location.search);
+    return (
+      <JoinSessionView
+        sessionId={joinMatch[1]}
+        token={q.get('t') || ''}
+        onReset={() => { window.location.href = import.meta.env.BASE_URL; }}
+      />
+    );
+  }
+
+  // ── Password-reset email link (mode=resetPassword&oobCode=…): show the
+  //    branded reset screen before anything else — it works even when the
+  //    visitor isn't signed in.
+  if (resetFlow) {
+    return (
+      <ResetPasswordView
+        oobCode={resetFlow.oobCode}
+        onDone={() => {
+          setResetFlow(null);
+          window.history.replaceState({}, '', window.location.pathname);
+        }}
+      />
+    );
+  }
 
   // ── Auth gate: nothing renders until the session is verified ────────────
   if (!authChecked) {
@@ -388,6 +620,7 @@ export default function App() {
 
   const handleSignOut = async () => {
     await auth.signOut();
+    api.adminLock(); // owner console session dies with the login
     // ── Reset ALL in-memory state so the next account on this device starts
     //    with its own empty personal inventory — never the previous user's. ──
     setSession(null);
@@ -405,18 +638,29 @@ export default function App() {
     setLeads([]);
   };
 
-  // Brand intro animation on load — the t-shirt K folds open, then the
-  // app reveals underneath
+  // Brand intro animation on load — the t-shirt K folds open, the AI+ pill
+  // settles in front of the word, and the overlay lifts once the app behind
+  // is actually ready (fonts + session) — never a fixed timer, never stuck.
   if (showPreloader) {
-    return <KatalogitPreloader onComplete={() => setShowPreloader(false)} />;
+    return (
+      <KatalogitPreloader
+        ready={authChecked && fontsReady}
+        onComplete={() => setShowPreloader(false)}
+      />
+    );
   }
 
   if (!onboardingDone) {
-    return <OnboardingFlow onComplete={handleOnboardingComplete} />;
+    return (
+      <OnboardingFlow
+        onComplete={handleOnboardingComplete}
+        onDone={() => setOnboardingDone(true)}
+      />
+    );
   }
 
   return (
-    <div className={`web-app${lightweightMode ? ' lightweight-device' : ''}`}>
+    <div className="web-app">
       {!session?.emailVerified && (
         <div className="verify-banner" role="status">
           <MailCheck size={14} />
@@ -429,8 +673,7 @@ export default function App() {
         {/* SIDEBAR */}
         <aside className="sidebar">
           <div className="sidebar-logo">
-            <div className="sidebar-logo-icon"><Sparkles size={18}/></div>
-            <span className="sidebar-logo-text">KatalogitAI</span>
+            <KatalogitLogo className="kat-logo-sidebar" />
           </div>
           <nav className="sidebar-nav">
             {NAV_ITEMS.map(({ id, label, Icon }) => (
@@ -468,7 +711,7 @@ export default function App() {
             <div className="web-header-right">
               <div className="header-icon-btn" onClick={() => setShowNotifications(v => !v)} style={{ position:'relative' }}>
                 <Bell size={20} strokeWidth={2}/>
-                {pendingApprove.length > 0 && <span className="header-notif-dot"/>}
+                {(pendingApprove.length > 0 || unreadAnnouncements > 0) && <span className="header-notif-dot"/>}
                 {showNotifications && (
                   <div className="notif-dropdown" onClick={e => e.stopPropagation()}>
                     <div className="notif-dropdown-title">
@@ -477,7 +720,18 @@ export default function App() {
                     </div>
                     {notifications.length === 0
                       ? <div className="notif-empty">You're all caught up.</div>
-                      : notifications.map(n => <div key={n.id} className="notif-item">{n.text}</div>)}
+                      : notifications.map(n => (
+                          <div key={n.id} className="notif-item">
+                            <span style={{ flex: 1 }}>{n.text}</span>
+                            {n.dismissable && (
+                              <button
+                                className="notif-dismiss"
+                                aria-label="Dismiss"
+                                onClick={() => dismissAnnouncement(n.annId)}
+                              >✕</button>
+                            )}
+                          </div>
+                        ))}
                   </div>
                 )}
               </div>
@@ -490,7 +744,7 @@ export default function App() {
           <main className="web-content">
             {activeTab === 'Home' && (
               <>
-                <BannerCarousel/>
+                <BannerCarousel banners={banners} />
                 <CatalogGrid products={products} onAddClick={() => setIsAddModalOpen(true)}
                   onProductClick={p => setSelectedPdpProduct(p)}
                   searchQuery={searchQuery} setSearchQuery={setSearchQuery}/>
@@ -501,6 +755,7 @@ export default function App() {
                 pendingApprove={pendingApprove}
                 pendingRetake={pendingRetake}
                 pendingDraft={pendingDraft}
+                sessions={sessions}
                 walletBalance={wallet?.balance ?? 0}
                 onApprove={handleApproveProduct}
                 onSendToRetake={handleSendToRetake}
@@ -511,6 +766,8 @@ export default function App() {
                 onRegenShot={handleRegenShot}
                 onFullRegen={handleFullRegen}
                 onUpdateProduct={handleUpdatePending}
+                onCloseSession={handleCloseSession}
+                onResumeSession={handleResumeSession}
               />
             )}
             {activeTab === 'Stats'    && <StatsView products={products} wallet={wallet} ledger={ledger} drafts={pendingDraft.length} />}
@@ -518,11 +775,10 @@ export default function App() {
               <SettingsView
                 profile={storeProfile}
                 wallet={wallet}
-                lightweightMode={lightweightMode} setLightweightMode={setLightweightMode}
                 onOpenTopUp={() => setShowTopUp(true)}
                 onOpenTransactions={() => setShowTransactions(true)}
                 isAdmin={isAdmin}
-                onOpenAdmin={() => setShowAdmin(true)}
+                onOpenAdmin={openAdminConsole}
                 onSignOut={handleSignOut}
                 email={session?.email}
                 emailVerified={session?.emailVerified}
@@ -544,11 +800,13 @@ export default function App() {
 
       {isAddModalOpen && (
         <AddProductFlow
-          onClose={() => setIsAddModalOpen(false)}
+          onClose={() => { setIsAddModalOpen(false); setResumeSessionId(null); }}
           walletBalance={wallet?.balance ?? 0}
           onOpenTopUp={() => setShowTopUp(true)}
           onShootComplete={handleShootComplete}
           onLowBalanceAlert={handleLowBalanceAlert}
+          initialSessionId={resumeSessionId}
+          onSessionClosed={refreshSessions}
         />
       )}
       {selectedPdpProduct && (
@@ -576,11 +834,23 @@ export default function App() {
           ledger={adminLedger}
           alerts={alerts}
           leads={leads}
+          banners={adminBanners}
+          announcements={adminAnnouncements}
           onGift={handleGift}
           onResolveAlert={handleResolveAlert}
           onResolveLead={handleResolveLead}
+          onSaveBanner={handleSaveBanner}
+          onDeleteBanner={handleDeleteBanner}
+          onSaveAnnouncement={handleSaveAnnouncement}
+          onDeleteAnnouncement={handleDeleteAnnouncement}
+          jobs={adminJobs}
+          orders={adminOrders}
           onClose={() => setShowAdmin(false)}
+          onLock={handleAdminLock}
         />
+      )}
+      {showAdminUnlock && (
+        <AdminUnlockModal onUnlocked={handleAdminUnlocked} onClose={() => setShowAdminUnlock(false)} />
       )}
     </div>
   );

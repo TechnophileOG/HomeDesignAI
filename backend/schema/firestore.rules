@@ -15,63 +15,57 @@ service cloud.firestore {
       return signedIn() && get(/databases/$(database)/documents/stores/$(storeId)).data.ownerUid == request.auth.uid;
     }
 
-    function isAdmin() {
-      return signedIn() && request.auth.token.role == 'admin';
-    }
+    // ── Security model ──────────────────────────────────────────────
+    // The browser NEVER writes to Firestore — it only signs in via the
+    // Firebase Auth SDK and talks to the Cloud Run API for everything else.
+    // The API uses the Admin SDK, which BYPASSES these rules. So these rules
+    // are pure defense-in-depth: clients get read access strictly scoped to
+    // their own data, and ALL writes are denied at the rules layer.
+    //
+    // There is deliberately NO `isAdmin()` custom-claims path here: the
+    // backend stopped trusting custom claims (Owner Console is gated by
+    // OWNER_EMAIL + a passcode-issued HMAC session). Keeping a claims-based
+    // admin path in the rules would re-open a hole the app closed.
 
-    // ── users ────────────────────────────────────────────────
+    // ── users ───────────────────────────────────────────────────────
+    // Read self only. Created/updated by the API (Admin SDK).
     match /users/{userId} {
-      allow read: if isOwner(userId) || isAdmin();
-      // users only self-created via backend trigger; clients update only
-      // non-sensitive own fields
-      allow create: if isOwner(userId);
-      allow update, delete: if isOwner(userId) && request.resource.data.diff(resource.data).affectedKeys()
-                              .hasOnly(['displayName', 'phone', 'email', 'preferences']);
+      allow read: if isOwner(userId);
     }
 
-    // ── stores ──────────────────────────────────────────────
+    // ── stores ──────────────────────────────────────────────────────
+    // Read own store only (ownerUid must equal the caller). Writes are
+    // API-only — clients can never self-upgrade plan/status/credits.
     match /stores/{storeId} {
-      allow read: if isStoreOwner(storeId) || isAdmin();
-      allow create: if signedIn() && request.resource.data.ownerUid == request.auth.uid;
-      // Owners may edit profile fields ONLY. plan/status/credits/aiFeatures
-      // are server-managed — clients must never self-upgrade their plan.
-      allow update: if isStoreOwner(storeId)
-        && request.resource.data.ownerUid == resource.data.ownerUid
-        && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['name','city','storeType','categories','scale',
-                       'salesChannel','yearsInBusiness','inventoryTurnover',
-                       'hasInventorySystem','orderValue','brandStyle']);
-      allow delete: if false; // soft-delete only, via backend
+      allow read: if isStoreOwner(storeId);
 
-      // ── products ──────────────────────────────────────────
+      // ── products ────────────────────────────────────────────────
+      // Read own products only. Created/updated/deleted via the API
+      // (Admin SDK) — direct client writes could fake status:'live' or
+      // gallery paths and skip the review/credit flow.
       match /products/{productId} {
-        allow read: if isStoreOwner(storeId) || isAdmin();
-        allow create, update: if isStoreOwner(storeId);
-        allow delete: if isStoreOwner(storeId);
+        allow read: if isStoreOwner(storeId);
       }
 
-      // ── jobs (async AI pipeline) ──────────────────────────
+      // ── jobs (async AI pipeline) ─────────────────────────────────
+      // Read own jobs only. Jobs are created/updated ONLY by the API +
+      // worker (Admin SDK) — client writes would bypass credit
+      // reservation and queue limits.
       match /jobs/{jobId} {
-        allow read: if isStoreOwner(storeId) || isAdmin();
-        // Jobs are created/updated ONLY by the API + worker (Admin SDK
-        // bypasses these rules). Clients must NOT write jobs directly —
-        // that would bypass credit reservation and queue limits.
-        allow create, update, delete: if false;
+        allow read: if isStoreOwner(storeId);
       }
 
-      // ── notifications ─────────────────────────────────────
+      // ── notifications ────────────────────────────────────────────
+      // Read own notifications; owner may mark their own as read/seen.
+      // Create/delete are backend-only.
       match /notifications/{nid} {
         allow read, update: if isStoreOwner(storeId);
-        allow create, delete: if false; // backend only
       }
     }
 
-    // Server-only collections — no direct client access
-    match /admin/{doc=**} {
-      allow read, write: if isAdmin();
-    }
-
-    // Everything else denied by default
+    // Everything else (admin, webhook_events, audit_events, orders,
+    // subscriptions, geocode_cache, leads, verification_requests, …) is
+    // server-only — no client access of any kind.
     match /{document=**} {
       allow read, write: if false;
     }

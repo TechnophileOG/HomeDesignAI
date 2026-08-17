@@ -105,6 +105,8 @@ coreRouter.post('/stores', storeCreateLimiter, async (req, res, next) => {
       updatedAt: now(),
       name: body.name || 'My Store',
       city: body.city || '',
+      pin: body.pin || '',
+      location: body.location || null,
       categories: body.categories || [],
       scale: body.scale || 'starter',
       aiFeatures: body.aiFeatures || [],
@@ -184,11 +186,15 @@ coreRouter.post('/stores/:storeId/products', requireStoreOwner, async (req, res,
     safeParam(req.params.storeId, 'store id');
     // storeId scopes every photo reference to THIS store (cross-tenant guard).
     const clean = sanitizeProduct(req.body || {}, req.store.id);
+    // A product is NEVER created live: it starts in the review/draft queue
+    // and only the review flow (approve) promotes it. Accepting 'live' on
+    // create would let a client skip the AI-generation queue entirely.
+    const CREATE_STATUS = ['pending_approve', 'draft'];
     const productId = clean.id || `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const doc = {
       id: productId,
       storeId: req.store.id,
-      status: clean.status || 'pending_approve',
+      status: CREATE_STATUS.includes(clean.status) ? clean.status : 'pending_approve',
       createdAt: now(),
       updatedAt: now(),
       ...clean,

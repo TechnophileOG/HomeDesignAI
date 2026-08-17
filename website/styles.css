@@ -307,6 +307,15 @@ body {
   font-size: 24px;
 }
 
+/* KatalogitAI brand mark — the folded-t-shirt K (same mark as the app) */
+.logo-k {
+  width: 28px;
+  height: auto;
+  margin-right: 8px;
+  flex: 0 0 auto;
+  display: block;
+}
+
 .nav-links {
   display: flex;
   list-style: none;
@@ -1143,7 +1152,7 @@ body {
 
 .pricing-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 24px;
   margin-bottom: 32px;
   max-width: 1100px;
@@ -1703,7 +1712,14 @@ html {
   transition: color .15s, transform .15s;
 }
 .auth-close:hover { color: var(--primary); transform: rotate(90deg); }
-.auth-logo { font-weight: 800; color: var(--text-dark); margin-bottom: 14px; }
+.auth-logo {
+  font-weight: 800;
+  color: var(--text-dark);
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  font-size: 1.05rem;
+}
 .auth-title { font-size: 1.5rem; font-weight: 800; color: var(--text-dark); margin: 0 0 4px; }
 .auth-sub { font-size: .85rem; color: var(--text-gray); margin: 0 0 18px; line-height: 1.5; }
 .auth-tabs { display: flex; gap: 6px; background: rgba(0,0,0,.05); padding: 4px; border-radius: 12px; margin-bottom: 20px; }
@@ -1940,4 +1956,40 @@ html {
 }
 .value-cta {
   margin-top: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Attention "jitter" — a tiny, periodic wiggle that pulls the eye to
+   the hero demo and CTA instead of letting visitors scroll past.
+   Deliberately subtle: ~0.35s of ±2px movement, once every 7s, and
+   fully disabled for prefers-reduced-motion users.
+   ═══════════════════════════════════════════════════════════════════ */
+@keyframes heroJitter {
+  0%   { transform: translate(0, 0) rotate(0deg); }
+  1%   { transform: translate(0, -2px) rotate(-0.5deg); }
+  2%   { transform: translate(0, 2px) rotate(0.5deg); }
+  3%   { transform: translate(0, -1.5px) rotate(-0.35deg); }
+  4%   { transform: translate(0, 1.5px) rotate(0.35deg); }
+  5%   { transform: translate(0, -1px) rotate(-0.2deg); }
+  6%   { transform: translate(0, 0) rotate(0deg); }
+  100% { transform: translate(0, 0) rotate(0deg); }
+}
+.hero-demo-panel {
+  animation: heroJitter 7s ease-in-out infinite;
+}
+
+@keyframes ctaNudge {
+  0%, 90%, 100% { transform: scale(1); box-shadow: 0 4px 12px rgba(255,107,53,0.3); }
+  93% { transform: scale(1.04) translateY(-2px); box-shadow: 0 8px 22px rgba(255,107,53,0.38); }
+  96% { transform: scale(0.99) translateY(0); }
+}
+.hero-ctas .btn-primary {
+  animation: ctaNudge 4.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-demo-panel,
+  .hero-ctas .btn-primary {
+    animation: none;
+  }
 }

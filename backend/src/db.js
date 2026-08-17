@@ -45,8 +45,11 @@ export const notifsColl = (storeId) => db.collection(`stores/${storeId}/notifica
 export const walletRef = (storeId) => db.doc(`wallets/${storeId}`);
 export const opRef = (idemKey) => db.doc(`credit_ops/${idemKey}`);
 export const ordersColl = () => db.collection('orders');
+export const subscriptionsColl = () => db.collection('subscriptions');
 export const adminAlertsColl = () => db.collection('admin_alerts');
 export const usersRef = (uid) => db.doc(`users/${uid}`);
+export const sessionsColl = () => db.collection('sessions');
+export const sessionPhotosColl = (sessionId) => db.collection(`sessions/${sessionId}/photos`);
 
 /** Firestore documents → plain JSON (strip undefined, keep timestamps as-is). */
 export const snap = (doc) => (doc.exists ? { id: doc.id, ...doc.data() } : null);

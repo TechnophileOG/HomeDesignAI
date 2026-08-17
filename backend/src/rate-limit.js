@@ -25,6 +25,13 @@ export const globalLimiter = rateLimit({
   limit: 600,                       // generous per-IP baseline
   standardHeaders: 'draft-7',
   legacyHeaders: false,
+  // Multi-device bulk capture: every phone on a store's WiFi shares ONE
+  // public IP. The live-session public routes (join/photo/confirm) are
+  // already bounded by their own limiters — per-DEVICE token for photos
+  // (60/min) and per-IP for join (300/hr) — so the global per-IP budget
+  // must NOT cap a big store's shoot (8+ phones × 60 photos would blow
+  // 600/15min). Everything else keeps the per-IP budget.
+  skip: (req) => /^\/api\/v1\/public\/sessions\//.test(String(req.path || '')),
   handler: sendBlocked,
 });
 

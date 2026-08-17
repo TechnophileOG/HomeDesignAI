@@ -49,8 +49,11 @@ export async function getWallet(storeId) {
   return getWalletData(storeId);
 }
 
-/** Idempotently grant credits (welcome bonus, top-up, gift, admin adjust). */
-export async function grantCredits({ storeId, amount, idemKey, type = 'GRANT', note = '', actor = 'system' }) {
+/** Idempotently grant credits (welcome bonus, top-up, gift, admin adjust).
+    `plan` (optional) upgrades the wallet tier inside the SAME transaction and
+    idempotency marker as the credit grant — a paid top-up can atomically flip
+    the store to PRO, and a replayed webhook can never apply it twice. */
+export async function grantCredits({ storeId, amount, idemKey, type = 'GRANT', note = '', actor = 'system', plan = null }) {
   if (!(amount > 0)) throw new Error('grant amount must be positive');
   return runIdempotent(idemKey, async (tx) => {
     const ref = walletRef(storeId);
@@ -60,12 +63,14 @@ export async function grantCredits({ storeId, amount, idemKey, type = 'GRANT', n
     }
     const before = doc.exists ? doc.data().balance : 0;
     const balance = before + amount;
-    tx.update(ref, { balance, updatedAt: Date.now() });
+    const update = { balance, updatedAt: Date.now() };
+    if (plan) update.plan = plan;
+    tx.update(ref, update);
     writeLedger(tx, storeId, {
       type: 'GRANT', amount, balanceAfter: balance, referenceType: 'GRANT',
       referenceId: idemKey, note, actor,
     });
-    return { storeId, balance };
+    return { storeId, balance, plan: plan || (doc.exists ? doc.data().plan : DEFAULT_PLAN) };
   });
 }
 

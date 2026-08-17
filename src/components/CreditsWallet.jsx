@@ -1,14 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Coins, CreditCard, ArrowDownLeft, ArrowUpRight, Sparkles, X, Wallet, ShieldCheck } from 'lucide-react';
-import { formatINR, timeAgo, LEDGER_META, api } from '../api/client';
+import { formatINR, timeAgo, LEDGER_META, api, CREDIT_PRICING } from '../api/client';
 
 /* ── Fallback credit packs (the server list is fetched and wins) ─────────── */
 const FALLBACK_PACKS = [
-  { packId: 'pack_50',   credits: 50,   pricePaise: 24900,  currency: 'INR' },
-  { packId: 'pack_120',  credits: 120,  pricePaise: 49900,  currency: 'INR' },
-  { packId: 'pack_300',  credits: 300,  pricePaise: 99900,  currency: 'INR' },
-  { packId: 'pack_1000', credits: 1000, pricePaise: 249900, currency: 'INR' },
+  { packId: 'pack_50',   credits: 50,   pricePaise: 34900,  currency: 'INR' },
+  { packId: 'pack_120',  credits: 120,  pricePaise: 69900,  currency: 'INR' },
+  { packId: 'pack_300',  credits: 300,  pricePaise: 149900, currency: 'INR' },
+  { packId: 'pack_1000', credits: 1000, pricePaise: 449900, currency: 'INR' },
 ];
+
+/* ── Pro subscription (₹499/mo — credits + priority + 20% off top-ups).
+   The monthly credit count comes from the server (source of truth). */
+const SUB_PRICE = 49900;
 
 const toPack = (p, idx) => ({
   id: p.packId,
@@ -27,22 +31,27 @@ const loadRazorpay = () => new Promise((resolve, reject) => {
   document.head.appendChild(s);
 });
 
-const payWithRazorpay = ({ keyId, orderId, amountPaise, currency, credits }) =>
+const payWithRazorpay = ({ keyId, orderId, subscriptionId, amountPaise, currency, credits }) =>
   new Promise((resolve, reject) => {
     const RazorpayCtor = window.Razorpay;
     if (!RazorpayCtor) { reject(new Error('Payment gateway unavailable.')); return; }
     const options = {
       key: keyId,
-      order_id: orderId,
       amount: amountPaise,
       currency: currency || 'INR',
       name: 'KatalogitAI',
-      description: `Add ${credits} credits to your wallet`,
+      description: subscriptionId
+        ? `KatalogitAI Pro — ${credits} credits every month`
+        : `Add ${credits} credits to your wallet`,
       handler: (response) => resolve(response),
       modal: { ondismiss: () => reject(new Error('Payment cancelled.')) },
       prefill: {},
       theme: { color: '#0e6b3f' },
     };
+    // A Razorpay subscription uses subscription_id (recurring), a one-off
+    // top-up uses order_id. Mutually exclusive — never send both.
+    if (subscriptionId) options.subscription_id = subscriptionId;
+    else if (orderId) options.order_id = orderId;
     try {
       const rzp = new RazorpayCtor(options);
       rzp.open();
@@ -73,11 +82,9 @@ export function WalletCard({ wallet, onOpenTopUp, onOpenTransactions }) {
 
       <div className="wallet-card-row">
         <div className="wallet-usage">
-          <div className="wallet-usage-bar">
-            <div className="wallet-usage-fill" style={{ width: `${Math.min(100, balance)}%` }} />
-          </div>
           <span className="wallet-usage-note">
-            AI photoshoot costs {formatINR(3)} credits per product
+            ≈ {Math.floor(balance / (CREDIT_PRICING.model_shoot || 3))} AI shoot{(Math.floor(balance / (CREDIT_PRICING.model_shoot || 3))) === 1 ? '' : 's'} remaining
+            {' '}· {formatINR(CREDIT_PRICING.model_shoot || 3)} credits per product
           </span>
         </div>
       </div>
@@ -101,6 +108,23 @@ export function TopUpModal({ onClose, onTopUp, initialPack }) {
   const [paying, setPaying] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
+  const [subPlans, setSubPlans] = useState([]);
+  const [subEnabled, setSubEnabled] = useState(false);
+  const [subscribing, setSubscribing] = useState(false);
+
+  // Fetch the Pro subscription plan availability (server knows if Razorpay
+  // plan id is configured).
+  useEffect(() => {
+    let mounted = true;
+    api.getSubscriptionPlan()
+      .then((plan) => {
+        if (!mounted || !plan) return;
+        setSubEnabled(!!plan.configured);
+        if (plan.configured) setSubPlans([{ id: 'pro_sub', price: Math.round(plan.pricePaise / 100), credits: plan.monthlyCredits }]);
+      })
+      .catch(() => { /* subscription just won't show */ });
+    return () => { mounted = false; };
+  }, []);
 
   // Packs come from the server (single source of truth for pricing).
   useEffect(() => {
@@ -164,10 +188,61 @@ export function TopUpModal({ onClose, onTopUp, initialPack }) {
             <div className="kv-modal-title-row">
               <div className="kv-modal-icon"><CreditCard size={20} /></div>
               <div>
-                <h3 className="kv-modal-title">Top up credits</h3>
-                <p className="kv-modal-sub">Secured checkout via Razorpay</p>
+                <h3 className="kv-modal-title">Add credits</h3>
+                <p className="kv-modal-sub">Secured checkout via Razorpay · ₹{formatINR(Math.round(SUB_PRICE / 100))}/mo Pro available</p>
               </div>
             </div>
+
+            {subEnabled && subPlans.length > 0 && (
+              <div className="sub-card">
+                <div className="sub-card-head">
+                  <div>
+                    <div className="sub-card-title">
+                      <Sparkles size={14} /> KatalogitAI Pro
+                    </div>
+                    <div className="sub-card-sub">
+                      {formatINR(subPlans[0].credits)} credits every month · priority queue · 20% off top-ups
+                    </div>
+                  </div>
+                  <div className="sub-card-price">₹{formatINR(subPlans[0].price)}<span>/mo</span></div>
+                </div>
+                <button
+                  className="kv-btn kv-btn-primary kv-btn-lg"
+                  disabled={paying || subscribing}
+                  onClick={async () => {
+                    if (subscribing) return;
+                    setSubscribing(true);
+                    setError('');
+                    try {
+                      const sub = await api.createSubscription();
+                      await loadRazorpay();
+                      await payWithRazorpay({
+                        keyId: sub.keyId,
+                        subscriptionId: sub.subscriptionId,
+                        amountPaise: sub.amountPaise,
+                        currency: sub.currency,
+                        credits: subPlans[0].credits,
+                      });
+                      setSuccess(true);
+                      if (onTopUp) onTopUp();
+                    } catch (err) {
+                      console.error('[subscribe] failed:', err);
+                      setError(err?.message || 'Subscription could not be started.');
+                    } finally {
+                      setSubscribing(false);
+                    }
+                  }}
+                >
+                  {subscribing ? (
+                    <><span className="ai-spinner" style={{ width: 14, height: 14 }} /> Starting…</>
+                  ) : (
+                    <>Subscribe ₹{formatINR(subPlans[0].price)}/mo</>
+                  )}
+                </button>
+              </div>
+            )}
+
+            <div className="topup-divider">or top up once</div>
 
             <div className="pack-grid">
               {packs.map((p) => (

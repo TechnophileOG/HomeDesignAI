@@ -9,7 +9,7 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "smoke": "node test/smoke.mjs",
-    "test": "node test/templates.test.mjs && node test/fallback.test.mjs && node test/export.test.mjs"
+    "test": "node test/templates.test.mjs && node test/fallback.test.mjs && node test/text.test.mjs && node test/sessions.test.mjs && node test/export.test.mjs && node test/validate.test.mjs && node test/email.test.mjs"
   },
   "dependencies": {
     "@google-cloud/firestore": "^7.11.0",

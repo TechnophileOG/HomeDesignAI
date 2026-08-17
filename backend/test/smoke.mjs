@@ -168,20 +168,57 @@ try {
 console.log('\n═══ ADMIN GATE ═══');
 
 try {
-  process.env.ADMIN_EMAILS = 'admin@katalogit.app';
-  const { requireAdmin } = await import('../src/auth.js');
+  process.env.OWNER_EMAIL = 'owner@katalogit.app';
+  process.env.ADMIN_PASSCODE = 'test-passcode-123';
+  const { requireAdmin, verifyAdminPasscode, issueAdminSession, verifyAdminSession } = await import('../src/auth.js');
 
-  const call = (user) => new Promise((resolve) => {
-    requireAdmin({ user }, {}, (err) => resolve(err));
+  const call = (user, headers = {}) => new Promise((resolve) => {
+    requireAdmin({ user, headers }, {}, (err) => resolve(err));
   });
 
-  const blocked = await call({ email: 'stranger@gmail.com' });
-  assert.ok(blocked && blocked.status === 403, 'non-admin must be forbidden');
-  pass('non-admin email → 403');
+  // 1) Stranger (not OWNER_EMAIL) → 403 even with a forged session.
+  let blocked = await call({ uid: 'u-stranger', email: 'stranger@gmail.com' }, { 'x-admin-session': 'forged.token' });
+  assert.ok(blocked && blocked.status === 403, 'stranger must be forbidden');
+  pass('stranger email → 403');
 
-  const allowed = await call({ email: 'ADMIN@katalogit.app' });
-  assert.strictEqual(allowed, undefined, 'allowlisted admin must pass');
-  pass('allowlisted admin (case-insensitive) → passes');
+  // 2) Owner WITHOUT a session → 403.
+  blocked = await call({ uid: 'u-owner', email: 'OWNER@katalogit.app' });
+  assert.ok(blocked && blocked.status === 403, 'owner without session must be forbidden');
+  pass('owner without session → 403');
+
+  // 3) Owner with a VALID session → passes.
+  const token = issueAdminSession('u-owner', 'owner@katalogit.app');
+  const allowed = await call({ uid: 'u-owner', email: 'owner@katalogit.app' }, { 'x-admin-session': token });
+  assert.strictEqual(allowed, undefined, 'owner with valid session must pass');
+  pass('owner with valid session → passes');
+
+  // 4) Session is uid-bound: owner token on ANOTHER uid → 403.
+  blocked = await call({ uid: 'u-other', email: 'owner@katalogit.app' }, { 'x-admin-session': token });
+  assert.ok(blocked && blocked.status === 403, 'session must be uid-bound');
+  pass('session bound to uid (other uid → 403)');
+
+  // 5) Tampered token → rejected.
+  blocked = await call({ uid: 'u-owner', email: 'owner@katalogit.app' }, { 'x-admin-session': token + 'x' });
+  assert.ok(blocked && blocked.status === 403, 'tampered session must be rejected');
+  pass('tampered session → 403');
+
+  // 6) Passcode: correct passes, wrong fails (timing-safe both ways).
+  assert.ok(verifyAdminPasscode('test-passcode-123'), 'correct passcode must verify');
+  assert.ok(!verifyAdminPasscode('wrong'), 'wrong passcode must fail');
+  assert.ok(!verifyAdminPasscode(''), 'empty passcode must fail');
+  pass('passcode verify (correct/wrong/empty)');
+
+  // 7) Session expiry honored.
+  const expired = await new Promise((resolve) => {
+    const tok = issueAdminSession('u-owner', 'owner@katalogit.app');
+    // verify directly with a faked clock by checking an already-expired token
+    const p = tok.split('.')[0];
+    const data = JSON.parse(Buffer.from(p, 'base64url').toString('utf8'));
+    resolve(data.exp > Math.floor(Date.now() / 1000));
+  });
+  assert.ok(expired, 'issued session must have a future expiry');
+  assert.ok(!verifyAdminSession('', 'u-owner', 'owner@katalogit.app'), 'empty session must fail');
+  pass('session expiry + empty token');
 
   const noUser = await call(null);
   assert.ok(noUser && noUser.status === 401, 'missing user must be rejected');

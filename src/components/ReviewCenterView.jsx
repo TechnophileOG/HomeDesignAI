@@ -84,8 +84,68 @@ function BulkBar({ count, section, onDelete, onRetake, onClear }) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════ */
+const timeAgoShort = (ts) => {
+  if (!ts) return '';
+  const s = Math.floor((Date.now() - ts) / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
+
+/* ── Live session card (bulk cataloging, QR-joined devices) ────────────── */
+function SessionCard({ session, onClose, onResume }) {
+  const live = session.status === 'active';
+  const devices = session.devices || [];
+  const activity = session.activity || [];
+  const last = activity.slice(-2).reverse();
+  return (
+    <div className={`rc-session-card${live ? ' live' : ''}`}>
+      <div className="rc-session-head">
+        <div className="rc-session-title-row">
+          <span className={`rc-session-dot${live ? ' on' : ''}`} />
+          <span className="rc-session-title">{session.title || 'Bulk cataloging session'}</span>
+          <span className={`rc-session-status ${live ? 'live' : session.status}`}>
+            {live ? '● LIVE' : session.status.toUpperCase()}
+          </span>
+        </div>
+        <span className="rc-session-time">{timeAgoShort(session.createdAt)}</span>
+      </div>
+      <div className="rc-session-stats">
+        <span>📱 {devices.length + 1} device{devices.length !== 0 ? 's' : ''}</span>
+        <span>📸 {session.photoCount || 0} photo{(session.photoCount || 0) !== 1 ? 's' : ''}</span>
+      </div>
+      {activity.length > 0 && (
+        <div className="rc-session-activity">
+          {last.map((a, i) => (
+            <span key={i} className="rc-session-activity-line">
+              {a.type === 'device_joined' ? '📱' : '📸'}{' '}
+              {a.deviceName}: {a.detail || a.type.replace('_', ' ')}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="rc-session-actions">
+        {live ? (
+          <>
+            <button className="rc-session-btn rc-session-btn-resume" onClick={() => onResume(session.id)}>
+              <Sparkles size={13} /> Resume on this device
+            </button>
+            <button className="rc-session-btn rc-session-btn-close" onClick={() => onClose(session.id)}>
+              Close session
+            </button>
+          </>
+        ) : (
+          <span className="rc-session-closed-note">Photos are safe in the queue below when saved.</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function ReviewCenterView({
   pendingApprove, pendingRetake, pendingDraft = [],
+  sessions = [], onCloseSession, onResumeSession,
   onApprove, onSendToRetake, onDelete, onOpenRetakeSession,
   onOpenTopUp, walletBalance = 0, onGenerateDraft,
   onRegenShot, onFullRegen, onUpdateProduct,
@@ -126,6 +186,32 @@ export default function ReviewCenterView({
           )}
         </div>
       </div>
+
+      {/* ── Live cataloging sessions (bulk mode, QR-joined) ── */}
+      {sessions.length > 0 && (
+        <section className="rc-section">
+          <div className="rc-section-header">
+            <div className="rc-section-title-row">
+              <div className="rc-section-dot rc-dot-session"/>
+              <span className="rc-section-title">Live Cataloging Sessions</span>
+              <span className="rc-section-count">{sessions.length}</span>
+            </div>
+            <p className="rc-section-sub">
+              Bulk sessions you started — watch devices joining and photos coming in live, resume, or close.
+            </p>
+          </div>
+          <div className="rc-session-list">
+            {sessions.slice(0, 10).map((s) => (
+              <SessionCard
+                key={s.id}
+                session={s}
+                onClose={onCloseSession}
+                onResume={onResumeSession}
+              />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* ── Drafts (saved when balance couldn't fund the AI pass) ── */}
       {pendingDraft.length > 0 && (

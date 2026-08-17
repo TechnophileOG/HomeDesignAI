@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Search, Plus, Star, Sparkles } from 'lucide-react';
-import { sanitizeText } from '../api/sanitize';
+import { sanitizeTextLive } from '../api/sanitize';
 
 export default function CatalogGrid({ 
   products, 
@@ -35,7 +35,7 @@ export default function CatalogGrid({
             placeholder="Search products…"
             value={searchQuery}
             maxLength={80}
-            onChange={(e) => setSearchQuery(sanitizeText(e.target.value, 80))}
+            onChange={(e) => setSearchQuery(sanitizeTextLive(e.target.value, 80))}
           />
         </div>
       </div>
@@ -52,6 +52,23 @@ export default function CatalogGrid({
           </button>
         ))}
       </div>
+
+      {/* ── Empty / sparse-catalogue guidance → point at the + Add card ── */}
+      {products.length === 0 && (
+        <div className="catalog-empty">
+          <div className="catalog-empty-icon">📸</div>
+          <div className="catalog-empty-title">Your catalogue is empty</div>
+          <p className="catalog-empty-text">
+            Tap the <strong>+ Add</strong> card to shoot your first product —
+            one flat-lay photo in, professional model photos out.
+          </p>
+        </div>
+      )}
+      {products.length > 0 && products.length < 3 && (
+        <div className="catalog-nudge">
+          Keep building your catalogue — tap <strong>+ Add</strong> to add more products.
+        </div>
+      )}
 
       {/* ── Product Grid ── */}
       <div className="catalog-grid">

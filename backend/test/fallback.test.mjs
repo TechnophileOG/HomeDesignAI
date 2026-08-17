@@ -12,7 +12,7 @@
 
 import assert from 'node:assert';
 import {
-  vertexEndpoint, posePrompt, fallbackOutputPath, generateWithVertexAi,
+  vertexEndpoint, posePrompt, fallbackOutputPath, generateWithVertexAi, imageRequestPayload,
 } from '../src/ai-fallback.js';
 
 const results = [];
@@ -61,6 +61,20 @@ try {
   assert.ok(!a.includes('..'), 'no path traversal');
   pass('fallbackOutputPath matches GPU naming + deterministic');
 } catch (err) { fail('output paths', err); }
+
+console.log('\n═══ REQUEST PAYLOAD (live API shape) ═══');
+try {
+  const payload = imageRequestPayload({
+    prompt: 'a model wearing a kurti',
+    flatLayGcsUri: 'gs://katalogit-originals/stores/s/p/hero.png',
+    flatLayMimeType: 'image/png',
+  });
+  assert.ok(payload.generationConfig?.imageConfig, 'imageConfig must be INSIDE generationConfig (the live API rejects it at top level)');
+  assert.strictEqual(payload.generationConfig.imageConfig.aspectRatio, '2:3');
+  assert.deepStrictEqual(payload.generationConfig.responseModalities, ['IMAGE']);
+  assert.strictEqual(payload.contents[0].parts[0].fileData.fileUri, 'gs://katalogit-originals/stores/s/p/hero.png');
+  pass('payload shape verified (imageConfig inside generationConfig)');
+} catch (err) { fail('payload', err); }
 
 console.log('\n═══ GENERATE (stubbed deps) ═══');
 try {

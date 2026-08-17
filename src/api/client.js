@@ -6,7 +6,7 @@
    inventory/credit state anymore:
      • products/pending → Firestore via the API (per-user, ownership-guarded)
      • wallet/ledger     → server-managed — the UI can never mint credits
-     • admin data        → ADMIN_EMAILS-gated endpoints only
+     • admin data        → owner-console endpoints (OWNER_EMAIL + unlock session)
    The only localStorage left is the session cache (uid + last-known data),
    which exists purely so the app can gate rendering instantly on reload.
 
@@ -28,6 +28,24 @@ export const ORIGINALS_BUCKET = 'katalogit-originals';
 export const PROCESSED_BUCKET = 'katalogit-processed';
 
 const SESSION_KEY = 'kat_auth_v1';
+const ADMIN_SESSION_KEY = 'kat_admin_session_v1'; // owner console unlock (short-lived)
+
+/* ── Owner-console unlock session (short-lived, tab-scoped) ───────────────
+   Unlike the auth cache, this is kept in sessionStorage (dies with the tab)
+   and is a short-TTL token the SERVER re-verifies on every admin call — the
+   client never trusts its presence as proof of access. */
+const readAdminSession = () => {
+  try {
+    const raw = sessionStorage.getItem(ADMIN_SESSION_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+};
+const writeAdminSession = (token) => {
+  try { sessionStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify({ token })); } catch { /* noop */ }
+};
+const clearAdminSession = () => {
+  try { sessionStorage.removeItem(ADMIN_SESSION_KEY); } catch { /* noop */ }
+};
 
 /* ── Credit pricing (display only — the server is the source of truth) ──── */
 export const CREDIT_PRICING = {
@@ -84,6 +102,7 @@ export class ApiError extends Error {
 
 async function request(path, { method = 'GET', body, timeout = 30000 } = {}) {
   const token = await authToken();
+  const admin = readAdminSession();
   let res;
   try {
     res = await fetch(API_BASE + path, {
@@ -91,6 +110,8 @@ async function request(path, { method = 'GET', body, timeout = 30000 } = {}) {
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        // owner-console unlock token — only sent on admin routes
+        ...(path.startsWith('/admin') && admin?.token ? { 'x-admin-session': admin.token } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: AbortSignal.timeout(timeout),
@@ -102,6 +123,9 @@ async function request(path, { method = 'GET', body, timeout = 30000 } = {}) {
   let json = null;
   try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON */ }
   if (!res.ok) {
+    // A stale/expired unlock session is not a real error — drop it so the
+    // next admin action asks the owner to unlock again.
+    if (path.startsWith('/admin') && res.status === 403) clearAdminSession();
     throw new ApiError(
       json?.error?.message || `Request failed (${res.status}).`,
       json?.error?.code || 'ERROR',
@@ -114,7 +138,9 @@ async function request(path, { method = 'GET', body, timeout = 30000 } = {}) {
 /* ── photo display helpers ──────────────────────────────────────────────── */
 export const photoUrl = (path) => {
   if (!path) return '';
-  const bucket = String(path).includes('/flat_lay/') ? ORIGINALS_BUCKET : PROCESSED_BUCKET;
+  // flat-lay (owner uploads) and live-session captures live in the originals
+  // bucket; everything else (AI results) in the processed bucket.
+  const bucket = /\/(flat_lay|sessions)\//.test(String(path)) ? ORIGINALS_BUCKET : PROCESSED_BUCKET;
   return `${GCS_BASE}/${bucket}/${path}`;
 };
 
@@ -195,6 +221,58 @@ const toUiAdminStore = (s) => ({
   lastActive: new Date(s.updatedAt || s.createdAt || Date.now()).toISOString(),
 });
 
+const toUiBanner = (b) => ({
+  id: b.id,
+  title: b.title || '',
+  subtitle: b.subtitle || '',
+  badge: b.badge || '',
+  ctaText: b.ctaText || '',
+  ctaUrl: b.ctaUrl || '',
+  theme: [1, 2, 3].includes(b.theme) ? b.theme : 1,
+  enabled: !!b.enabled,
+  order: typeof b.order === 'number' ? b.order : 100,
+  createdAt: b.createdAt || 0,
+  updatedAt: b.updatedAt || 0,
+});
+
+const toUiAnnouncement = (a) => ({
+  id: a.id,
+  title: a.title || '',
+  message: a.message || '',
+  type: ['info', 'promo', 'maintenance'].includes(a.type) ? a.type : 'info',
+  enabled: !!a.enabled,
+  expiresAt: a.expiresAt || 0,
+  createdAt: a.createdAt || 0,
+});
+
+/** Admin banner form → server payload (whitelisted, length-capped). */
+const sanitizeBannerForServer = (b = {}) => {
+  const out = {
+    title: sanitizeText(b.title, 80),
+    subtitle: sanitizeText(b.subtitle, 200),
+    badge: sanitizeText(b.badge, 30),
+    ctaText: sanitizeText(b.ctaText, 40),
+    ctaUrl: sanitizeText(b.ctaUrl, 300),
+    theme: [1, 2, 3].includes(b.theme) ? b.theme : 1,
+    enabled: Boolean(b.enabled),
+    order: sanitizeInt(b.order, { min: 0, max: 1000, fallback: 100 }),
+  };
+  if (!/^https?:\/\/[^\s<>"']+$/.test(out.ctaUrl) && !out.ctaUrl.startsWith('/')) out.ctaUrl = '';
+  return out;
+};
+
+/** Admin announcement form → server payload. */
+const sanitizeAnnouncementForServer = (a = {}) => {
+  const out = {
+    title: sanitizeText(a.title, 100),
+    message: sanitizeText(a.message, 500),
+    type: ['info', 'promo', 'maintenance'].includes(a.type) ? a.type : 'info',
+    enabled: Boolean(a.enabled),
+  };
+  if (Number.isFinite(Number(a.expiresAt)) && Number(a.expiresAt) > 0) out.expiresAt = sanitizeInt(a.expiresAt, { min: 0, max: 4102444800000, fallback: 0 });
+  return out;
+};
+
 const toUiAlert = (a) => ({
   id: a.id,
   storeId: a.storeId || '',
@@ -212,6 +290,20 @@ const toUiAlert = (a) => ({
    ════════════════════════════════════════════════════════════════════════════ */
 export const api = {
   /* ── Session (local cache only — auth lives in Firebase) ─────────────── */
+
+  /* ── Owner console: unlock / lock / state ───────────────────────────────
+     Unlock proves ownership of the admin passcode and returns a short-lived
+     signed token. The SERVER is the source of truth — hasAdminSession() is
+     only a local hint so the UI can show the lock screen without a round-
+     trip; every admin call re-verifies the token server-side. */
+  async adminUnlock(passcode) {
+    const data = await request('/admin/unlock', { method: 'POST', body: { passcode }, timeout: 15000 });
+    if (data.token) writeAdminSession(data.token);
+    return data;
+  },
+  adminLock() { clearAdminSession(); },
+  hasAdminSession() { return !!readAdminSession()?.token; },
+
   async getSession() { return readSession(); },
   async saveSession(session) {
     // NOTE: no `token` field is persisted — ID tokens live only in the
@@ -254,9 +346,11 @@ export const api = {
       storeId ? this.listProducts() : Promise.resolve([]),
       storeId ? this.getCredits(storeId) : Promise.resolve({ balance: 0, plan: 'free' }),
       storeId ? this.getLedger(storeId) : Promise.resolve([]),
-      isAdmin ? this.adminGetStores() : Promise.resolve([]),
-      isAdmin ? this.adminFollowUps() : Promise.resolve([]),
-      isAdmin ? this.adminGetLeads() : Promise.resolve([]),
+      // Admin data is fetched ONLY when the owner has a valid unlock session
+      // — otherwise these 403 and the console stays locked.
+      isAdmin && this.hasAdminSession() ? this.adminGetStores() : Promise.resolve([]),
+      isAdmin && this.hasAdminSession() ? this.adminFollowUps() : Promise.resolve([]),
+      isAdmin && this.hasAdminSession() ? this.adminGetLeads() : Promise.resolve([]),
     ]);
     const pending = allProducts.filter(
       (p) => ['pending_approve', 'pending_retake', 'draft'].includes(p.status),
@@ -284,10 +378,18 @@ export const api = {
       body: {
         name: clean.storeName,
         city: clean.city,
+        pin: clean.pin,
+        location: clean.location,
         categories: clean.categories,
         scale: clean.scale,
         aiFeatures: clean.aiFeatures,
         salesChannel: clean.salesChannel,
+        storeType: clean.storeType,
+        yearsInBusiness: clean.yearsInBusiness,
+        inventoryTurnover: clean.inventoryTurnover,
+        hasInventorySystem: clean.hasInventorySystem,
+        orderValue: clean.orderValue,
+        brandStyle: clean.brandStyle,
       },
     });
     return { store: data.store, wallet: data.wallet };
@@ -307,12 +409,26 @@ export const api = {
       body: {
         name: clean.storeName,
         city: clean.city,
+        pin: clean.pin,
+        location: clean.location,
         categories: clean.categories,
         scale: clean.scale,
         aiFeatures: clean.aiFeatures,
       },
     });
     return data.store || clean;
+  },
+
+  /* ── Password reset (rate-limited server-side — see the public route) ── */
+  async sendPasswordResetEmail(email) {
+    // Public endpoint: works without a session. The server rate-limits per
+    // IP AND per email (3/hr IP, 2/hr email) and replies generically — no
+    // account enumeration, no way to spam reset emails.
+    await request('/public/auth/reset-email', {
+      method: 'POST',
+      body: { email: sanitizeEmail(email) },
+      timeout: 15000,
+    });
   },
 
   /* ── Products (live catalogue) ───────────────────────────────────────── */
@@ -406,6 +522,16 @@ export const api = {
     return data; // { orderId, credits, amountPaise, currency, keyId }
   },
 
+  /* ── Pro subscription (Razorpay recurring, ₹499/mo) ─────────────────── */
+  async getSubscriptionPlan() {
+    const data = await request('/credits/subscription');
+    return data.plan || null; // { pricePaise, monthlyCredits, currency, configured }
+  },
+  async createSubscription() {
+    const data = await request('/credits/subscriptions', { method: 'POST' });
+    return data; // { subscriptionId, keyId, amountPaise, currency }
+  },
+
   /* ── Async AI jobs ───────────────────────────────────────────────────── */
   async createJob({ type, productId }) {
     const data = await request('/jobs', { method: 'POST', body: { type, productId } });
@@ -420,6 +546,112 @@ export const api = {
     if (!storeId) return [];
     const data = await request('/jobs?limit=100');
     return data.jobs || [];
+  },
+
+  /* ── AI engine status (which model renders; is the proprietary pipeline
+     online?) — drives the honest fallback notice before a shoot ──────── */
+  async getAiStatus() {
+    const data = await request('/ai/status').catch(() => null);
+    return data || null; // { engine, proprietaryOnline, fallbackActive, workerActive, imageModel, textModel, textAiEnabled }
+  },
+
+  /* ── Live cataloging sessions (QR multi-device, owner side) ──────────── */
+  async createSession(title) {
+    const data = await request('/sessions', { method: 'POST', body: { title: title || '' } });
+    return data; // { session, joinToken, joinExpiresAt, joinUrl }
+  },
+  async listSessions() {
+    const data = await request('/sessions?limit=50');
+    return data.sessions || [];
+  },
+  async getSessionStatus(sessionId) {
+    const data = await request(`/sessions/${sessionId}`);
+    return data.session; // light status: { id, title, status, devices, photoCount, activity, createdAt }
+  },
+  async getSessionPhotos(sessionId) {
+    const data = await request(`/sessions/${sessionId}/photos`);
+    return data.photos || []; // [{ pid, deviceId, mime, dataUrl, index, ts }]
+  },
+  async mintJoinUrl(sessionId) {
+    const data = await request(`/sessions/${sessionId}/join-url`, { method: 'POST' });
+    return data; // { joinToken, joinExpiresAt, joinUrl }
+  },
+  async closeSession(sessionId) {
+    const data = await request(`/sessions/${sessionId}/close`, { method: 'POST' });
+    return data.session;
+  },
+
+  /* ── Joined-phone side (NO Firebase account — token-authenticated) ───── */
+  async joinSession(sessionId, token, deviceName) {
+    const res = await fetch(`${API_BASE}/public/sessions/${sessionId}/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, deviceName: deviceName || 'Phone' }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.ok) {
+      throw new ApiError(
+        json?.error?.message || 'Could not join the session.',
+        json?.error?.code || 'JOIN_FAILED',
+        res.status,
+      );
+    }
+    return json.data; // { sessionId, deviceId, deviceName, deviceToken, storeName }
+  },
+  /** Stage a capture: validates metadata, returns a signed GCS PUT URL. */
+  async sessionPhotoStart(sessionId, deviceToken, { mime, size, index }) {
+    const res = await fetch(`${API_BASE}/public/sessions/${sessionId}/photo`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${deviceToken}`,
+      },
+      body: JSON.stringify({ mime, size, index }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.ok) {
+      throw new ApiError(
+        json?.error?.message || 'Photo could not be staged.',
+        json?.error?.code || 'PHOTO_FAILED',
+        res.status,
+      );
+    }
+    return json.data; // { photoId, objectPath, uploadUrl }
+  },
+  /** Confirm the GCS upload — registers the capture in the session. */
+  async sessionPhotoConfirm(sessionId, deviceToken, photoId, { mime, size, index }) {
+    const res = await fetch(`${API_BASE}/public/sessions/${sessionId}/photo/${photoId}/confirm`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${deviceToken}`,
+      },
+      body: JSON.stringify({ mime, size, index }),
+      signal: AbortSignal.timeout(20000),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json?.ok) {
+      throw new ApiError(
+        json?.error?.message || 'Photo could not be confirmed.',
+        json?.error?.code || 'PHOTO_FAILED',
+        res.status,
+      );
+    }
+    return json.data; // { photoId, path }
+  },
+  /** Upload raw bytes to a signed GCS URL (no app token needed). */
+  async putBytes(uploadUrl, blob, contentType) {
+    const res = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { 'Content-Type': contentType },
+      body: blob,
+      signal: AbortSignal.timeout(120000),
+    });
+    if (!res.ok) {
+      throw new ApiError('Photo upload failed. Try again.', 'UPLOAD_FAILED', res.status);
+    }
   },
 
   /* ── Photo uploads (signed URLs) ─────────────────────────────────────── */
@@ -440,6 +672,61 @@ export const api = {
     if (!res.ok) {
       throw new ApiError('Photo upload failed. Try again.', 'UPLOAD_FAILED', res.status);
     }
+  },
+
+  /* ── Content: admin-controlled banners + announcements ──────────────── */
+  async getBanners() {
+    const data = await request('/content/banners');
+    return (data.banners || []).map(toUiBanner);
+  },
+  async getAnnouncements() {
+    const data = await request('/content/announcements');
+    return (data.announcements || []).map(toUiAnnouncement);
+  },
+  async adminListBanners() {
+    const data = await request('/admin/content/banners');
+    return (data.banners || []).map(toUiBanner);
+  },
+  async adminCreateBanner(banner) {
+    const data = await request('/admin/content/banners', { method: 'POST', body: sanitizeBannerForServer(banner) });
+    return data.banner;
+  },
+  async adminUpdateBanner(id, banner) {
+    const data = await request(`/admin/content/banners/${sanitizeId(id)}`, { method: 'PATCH', body: sanitizeBannerForServer(banner) });
+    return data.banner;
+  },
+  async adminDeleteBanner(id) {
+    await request(`/admin/content/banners/${sanitizeId(id)}`, { method: 'DELETE' });
+  },
+  async adminListAnnouncements() {
+    const data = await request('/admin/content/announcements');
+    return (data.announcements || []).map(toUiAnnouncement);
+  },
+  async adminCreateAnnouncement(ann) {
+    const data = await request('/admin/content/announcements', { method: 'POST', body: sanitizeAnnouncementForServer(ann) });
+    return data.announcement;
+  },
+  async adminUpdateAnnouncement(id, ann) {
+    const data = await request(`/admin/content/announcements/${sanitizeId(id)}`, { method: 'PATCH', body: sanitizeAnnouncementForServer(ann) });
+    return data.announcement;
+  },
+  async adminDeleteAnnouncement(id) {
+    await request(`/admin/content/announcements/${sanitizeId(id)}`, { method: 'DELETE' });
+  },
+
+  /* ── Account: branded verification email (rate-limited server-side) ──── */
+  async sendVerificationEmail() {
+    await request('/me/send-verification', { method: 'POST', timeout: 15000 });
+  },
+
+  /* ── Geocoding (store location) — proxied + rate-limited server-side ── */
+  async geocode(query) {
+    const data = await request('/geocode', {
+      method: 'POST',
+      body: { q: sanitizeText(query, 120) },
+      timeout: 15000,
+    });
+    return data.result || null; // { label, lat, lng } | null
   },
 
   /* ── Landing-page leads (real contact form) ─────────────────────────── */
@@ -507,7 +794,7 @@ export const api = {
     return data; // { filename, csv }
   },
 
-  /* ── Admin (ADMIN_EMAILS-gated server-side) ──────────────────────────── */
+  /* ── Owner console (requireAdmin server-side: OWNER_EMAIL + unlock token) ── */
   async adminGetStores() {
     const data = await request('/admin/stores');
     return (data.stores || []).map(toUiAdminStore);
@@ -526,6 +813,33 @@ export const api = {
   async adminFollowUps() {
     const data = await request('/admin/follow-ups');
     return (data.alerts || []).map(toUiAlert);
+  },
+  async adminGetJobs() {
+    const data = await request('/admin/jobs?limit=100');
+    return (data.jobs || []).map((j) => ({
+      id: j.id,
+      storeId: j.storeId,
+      storeName: j.storeName || j.storeId,
+      type: j.type || '',
+      status: j.status || 'queued',
+      creditsReserved: j.creditsReserved || 0,
+      errorCode: j.errorCode || null,
+      createdAt: new Date(j.createdAt || Date.now()).toISOString(),
+      updatedAt: new Date(j.updatedAt || j.createdAt || Date.now()).toISOString(),
+    }));
+  },
+  async adminGetOrders() {
+    const data = await request('/admin/orders?limit=100');
+    return (data.orders || []).map((o) => ({
+      id: o.orderId || o.id,
+      kind: o.kind || 'order',
+      storeId: o.storeId,
+      storeName: o.storeName || o.storeId,
+      credits: o.credits || 0,
+      amountPaise: o.amountPaise || 0,
+      status: o.status || '',
+      createdAt: new Date(o.createdAt || Date.now()).toISOString(),
+    }));
   },
 
   /* ── Legacy no-op saves (server is truth; kept for call-site safety) ─── */

@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { sanitizeName, sanitizeCity } from '../api/sanitize';
-import { Sparkles, Star, Gift } from 'lucide-react';
+import { Sparkles, Star, Gift, CheckCircle2, XCircle } from 'lucide-react';
+import { sanitizeNameLive, sanitizeCityLive } from '../api/sanitize';
+import { INDIA_LOCATIONS } from '../data/india-locations';
+import { api } from '../api/client';
+import { KShirtMark } from './KatalogitLogo';
 
 const CATEGORIES = [
   { id: 'women',     label: "Women's Clothing",   emoji: '👗' },
@@ -406,162 +409,142 @@ const StepDots = ({ current, total }) => {
   );
 };
 
-// Small storefront used for the "crowd of stores" under the cloud
-const CrowdStore = ({ delay = 0 }) => (
-  <div className="ob-crowd-store" style={{ '--crowd-delay': `${delay}s` }}>
-    <svg viewBox="0 0 40 36" className="ob-crowd-store-svg">
-      <rect x="6" y="14" width="28" height="20" rx="3" fill="#f2cba2" />
-      <path d="M 4 16 L 20 5 L 36 16 Z" fill="#167a52" />
-      <rect x="10" y="18" width="8" height="10" rx="1.5" fill="#fffdf8" />
-      <rect x="22" y="18" width="10" height="14" rx="1.5" fill="#a9743f" />
-    </svg>
-  </div>
-);
+/* ── Optional store-location modal — Google Maps embed, NO API key ──────── */
+const LocationModal = ({ open, onClose, onSave }) => {
+  const [address, setAddress] = useState('');
+  const [mapSrc, setMapSrc] = useState('https://www.google.com/maps?q=India&output=embed');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
 
-const EpicFinaleScreen = ({ storeName, onComplete }) => {
-  const [phase, setPhase] = useState(0);
+  if (!open) return null;
 
-  useEffect(() => {
-    const phases = [
-      { duration: 1500, action: () => setPhase(1) }, // Your store appears
-      { duration: 2000, action: () => setPhase(2) }, // KatalogitAI powers up
-      { duration: 2500, action: () => setPhase(3) }, // Store transforms + digital vault
-      { duration: 3000, action: () => setPhase(4) }, // Cloud ecosystem forms
-      { duration: 2000, action: () => setPhase(5) }, // Success message
-    ];
+  const applyQuery = (value) => {
+    const v = value.trim();
+    setAddress(value);
+    setMapSrc(`https://www.google.com/maps?q=${encodeURIComponent(v || 'India')}&output=embed`);
+  };
 
-    let timeouts = [];
-    phases.forEach((phase, index) => {
-      const timeout = setTimeout(phase.action, phases.slice(0, index).reduce((acc, p) => acc + p.duration, 0));
-      timeouts.push(timeout);
-    });
-
-    // Complete after all phases
-    const completeTimeout = setTimeout(() => {
-      onComplete();
-    }, phases.reduce((acc, p) => acc + p.duration, 0) + 1000);
-    timeouts.push(completeTimeout);
-
-    return () => timeouts.forEach(clearTimeout);
-  }, [onComplete]);
+  const save = async () => {
+    const label = address.trim().slice(0, 200);
+    if (!label) { setErr('Type a place, area or address first.'); return; }
+    setBusy(true);
+    setErr('');
+    // Geocoding goes through OUR backend (rate-limited per user + cached) —
+    // the browser never talks to a geocoder directly. Best-effort: if it
+    // fails, the human-readable label is still saved.
+    try {
+      const hit = await api.geocode(label);
+      if (hit && Number.isFinite(hit.lat) && Number.isFinite(hit.lng)) {
+        onSave({ label: hit.label || label, lat: hit.lat, lng: hit.lng });
+      } else {
+        onSave({ label });
+      }
+    } catch {
+      onSave({ label }); // coordinates optional — the label is enough
+    }
+    onClose();
+  };
 
   return (
-    <div className="ob-finale-screen-new">
-      {/* Animated background */}
-      <div className="ob-finale-bg-new">
-        <div className="ob-finale-stars">
-          {[...Array(20)].map((_, i) => (
-            <div key={i} className="ob-star" style={{ '--i': i }} />
-          ))}
+    <div className="ob-loc-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="ob-loc-card" role="dialog" aria-modal="true" aria-label="Add store location">
+        <div className="ob-loc-head">
+          <h3>📍 Add your store location</h3>
+          <button className="ob-loc-close" onClick={onClose} aria-label="Close">✕</button>
+        </div>
+        <p className="ob-loc-sub">Optional — helps us recommend local pricing and faster delivery to your customers.</p>
+        <div className="ob-loc-map">
+          <iframe
+            src={mapSrc}
+            title="Google Maps — store location"
+            loading="lazy"
+            allowFullScreen
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        </div>
+        <input
+          className="ob-input-new ob-loc-search"
+          placeholder="Search your store's area, e.g. Lajpat Nagar, Delhi"
+          value={address}
+          maxLength={200}
+          onChange={(e) => applyQuery(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); save(); } }}
+        />
+        {err && <p className="ob-loc-err">{err}</p>}
+        <div className="ob-loc-actions">
+          <button className="ob-btn-secondary-new" onClick={onClose}>Skip</button>
+          <button className="ob-btn-primary-new" onClick={save} disabled={busy}>
+            {busy ? 'Saving…' : 'Use this location'}
+          </button>
         </div>
       </div>
+    </div>
+  );
+};
 
-      {/* Your store — layered wrappers so appear/power/transform never
-          overwrite each other (the old single-element animation conflict
-          made the store disappear when it rose to the cloud) */}
-      <div className={`ob-finale-main-store ${phase >= 3 ? 'transform' : ''} ${phase >= 5 ? 'hide' : ''}`}>
-        <div className={`ob-store-wrap ${phase >= 1 ? 'appear' : ''}`}>
-          <div className={`ob-store-main ${phase >= 2 ? 'powered' : ''}`}>
-            <ShopGraphic storeName={storeName} currentStep={2} />
-          </div>
+/* ── Finale: REAL save to the database → branded loading → confirmation ────
+   No more pretend cloud animation. `onComplete` is awaited — the user sees a
+   brand loading screen while their data is sanitised + stored server-side,
+   then a real success (or an honest error with retry). */
+const SaveFlowScreen = ({ storeName, city, pin, profileData, onComplete, onDone }) => {
+  const [state, setState] = useState('saving'); // saving | success | error
+  const [errorMsg, setErrorMsg] = useState('');
+  const runRef = useRef(0);
 
-          {phase >= 2 && (
-            <>
-              <div className="ob-ai-energy-core">
-                <Sparkles size={60} />
-              </div>
-              <div className="ob-energy-waves">
-                <div className="ob-wave ob-wave-1" />
-                <div className="ob-wave ob-wave-2" />
-                <div className="ob-wave ob-wave-3" />
-              </div>
-              <div className="ob-power-particles">
-                {[...Array(12)].map((_, i) => (
-                  <div key={i} className="ob-particle" style={{ '--particle-i': i }} />
-                ))}
-              </div>
-            </>
-          )}
+  const save = async () => {
+    const run = ++runRef.current;
+    setState('saving');
+    setErrorMsg('');
+    try {
+      await onComplete(profileData);
+      if (run !== runRef.current) return;
+      setState('success');
+    } catch (err) {
+      if (run !== runRef.current) return;
+      setErrorMsg(err?.message || 'Something went wrong while saving your store.');
+      setState('error');
+    }
+  };
 
-          {/* Digital vault cage — the store gets sealed & charged before
-              it rises into the cloud */}
-          {phase >= 3 && (
-            <div className="ob-digital-cage">
-              <span className="ob-cage-corner ob-cage-tl" />
-              <span className="ob-cage-corner ob-cage-tr" />
-              <span className="ob-cage-corner ob-cage-bl" />
-              <span className="ob-cage-corner ob-cage-br" />
-              <span className="ob-cage-label">⚡ DIGITAL VAULT</span>
-            </div>
-          )}
-        </div>
-      </div>
+  useEffect(() => { save(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
-      {/* Cloud ecosystem forms around the store */}
-      {phase >= 4 && (
-        <div className="ob-cloud-ecosystem">
-          {/* Floating devices receiving data */}
-          <div className="ob-connected-devices">
-            {[...Array(6)].map((_, i) => (
-              <div key={i} className="ob-device" style={{ '--device-i': i }}>
-                <div className="ob-device-screen">
-                  <div className="ob-data-bars">
-                    <div className="ob-bar" />
-                    <div className="ob-bar" />
-                    <div className="ob-bar" />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Data streams — radiating in ALL directions from the store */}
-          <svg className="ob-data-streams" viewBox="0 0 100 100">
-            {Array.from({ length: 12 }).map((_, i) => {
-              const a = (i / 12) * Math.PI * 2;
-              const x1 = (50 + Math.cos(a) * 13).toFixed(1);
-              const y1 = (50 + Math.sin(a) * 13).toFixed(1);
-              const x2 = (50 + Math.cos(a) * 47).toFixed(1);
-              const y2 = (50 + Math.sin(a) * 47).toFixed(1);
-              const cx = (50 + Math.cos(a) * 33 - Math.sin(a) * 13).toFixed(1);
-              const cy = (50 + Math.sin(a) * 33 + Math.cos(a) * 13).toFixed(1);
-              return (
-                <path
-                  key={i}
-                  className="ob-data-stream"
-                  d={`M${x1},${y1} Q${cx},${cy} ${x2},${y2}`}
-                  style={{ '--stream-delay': `${i * 0.22}s` }}
-                />
-              );
-            })}
-          </svg>
-
-          {/* Cloud formations */}
-          <div className="ob-cloud-formations">
-            {[...Array(5)].map((_, i) => (
-              <div key={i} className="ob-cloud" style={{ '--cloud-i': i }}>
-                ☁️
-              </div>
-            ))}
-          </div>
-
-          {/* Crowd of stores below — every vendor joins the ecosystem */}
-          <div className="ob-crowd">
-            {[...Array(6)].map((_, i) => <CrowdStore key={i} delay={i * 0.15} />)}
-          </div>
+  return (
+    <div className="ob-overlay-new ob-save-screen">
+      {state === 'saving' && (
+        <div className="ob-save-inner">
+          <div className="ob-save-mark"><KShirtMark className="ob-save-shirt" /></div>
+          <div className="ob-save-ring" />
+          <h2 className="ob-title-new">Setting up {storeName || 'your store'}…</h2>
+          <p className="ob-save-status">
+            <Sparkles size={14} /> Securing your account · saving your preferences
+          </p>
+          <div className="ob-save-progress"><div className="ob-save-progress-fill" /></div>
         </div>
       )}
 
-      {/* Success message */}
-      {phase >= 5 && (
-        <div className="ob-finale-success-new">
-          <div className="ob-success-burst">🎉</div>
-          <h1>Welcome to the KatalogitAI Cloud!</h1>
-          <p>Your store {storeName} is now powered by AI and connected to the ecosystem</p>
-          <div className="ob-success-features">
-            <div>✨ Professional AI photoshoots ready</div>
-            <div>🚀 Smart pricing & descriptions active</div>
-            <div>📱 Multi-device sync enabled</div>
+      {state === 'success' && (
+        <div className="ob-save-inner ob-save-success">
+          <div className="ob-save-burst"><CheckCircle2 size={44} /></div>
+          <h2 className="ob-title-new">Your store is live!</h2>
+          <p className="ob-save-sub">
+            {storeName} is saved and ready. Welcome to KatalogitAI{city ? `, ${city}` : ''}!
+          </p>
+          <div className="ob-save-chips">
+            <div className="ob-save-chip">🏪 {storeName || 'My Store'}</div>
+            {city && <div className="ob-save-chip">📍 {city}{pin ? ` · ${pin}` : ''}</div>}
+            <div className="ob-save-chip">🎁 10 welcome credits</div>
+          </div>
+          <button className="ob-btn-primary-new" onClick={onDone}>Start cataloguing →</button>
+        </div>
+      )}
+
+      {state === 'error' && (
+        <div className="ob-save-inner ob-save-error">
+          <div className="ob-save-burst error"><XCircle size={44} /></div>
+          <h2 className="ob-title-new">Couldn't save your store</h2>
+          <p className="ob-save-sub">{errorMsg}</p>
+          <div className="ob-buttons-row-new">
+            <button className="ob-btn-primary-new" onClick={save}>Try again</button>
           </div>
         </div>
       )}
@@ -569,7 +552,7 @@ const EpicFinaleScreen = ({ storeName, onComplete }) => {
   );
 };
 
-export default function OnboardingFlow({ onComplete }) {
+export default function OnboardingFlow({ onComplete, onDone }) {
   const [step, setStep] = useState(1);
   const TOTAL_STEPS = 6; // Merged SKUs into catalog size
   const mainRef = useRef(null);
@@ -581,7 +564,14 @@ export default function OnboardingFlow({ onComplete }) {
 
   const [storeName, setStoreName] = useState('');
   const [name, setName] = useState('');
+  // City is picked from authentic State → City lists (with an 'Other' escape
+  // hatch that stays sanitized) — never free-form by default.
+  const [stateSel, setStateSel] = useState('');
   const [city, setCity] = useState('');
+  const [customCity, setCustomCity] = useState(false);
+  const [pin, setPin] = useState('');
+  const [location, setLocation] = useState(null);
+  const [showLocModal, setShowLocModal] = useState(false);
   const [storeType, setStoreType] = useState('');
   const [categories, setCategories] = useState([]);
   const [scale, setScale] = useState('');
@@ -599,29 +589,44 @@ export default function OnboardingFlow({ onComplete }) {
   const progressPct = ((step - 1) / (TOTAL_STEPS - 1)) * 100;
 
   const handleFinish = () => setStep(TOTAL_STEPS + 1);
-  const handleFinaleComplete = () => {
-    onComplete({
-      storeName, name, city, storeType, categories, scale,
-      salesChannel, yearsInBusiness, inventoryTurnover,
-      hasInventorySystem, orderValue,
-      brandStyle, aiFeatures
-    });
-  };
 
   const handleNext = () => { if (step < TOTAL_STEPS) setStep(step + 1); };
   const handlePrev = () => { if (step > 1) setStep(step - 1); };
 
+  const stateCities = INDIA_LOCATIONS.find((l) => l.state === stateSel)?.cities || [];
+  const handleStateChange = (v) => { setStateSel(v); setCity(''); setCustomCity(false); };
+  const handleCityChange = (v) => {
+    if (v === '__other__') { setCustomCity(true); setCity(''); }
+    else { setCustomCity(false); setCity(v); }
+  };
+
   const canGoNext = {
     1: true,
-    2: storeName.trim() && name.trim(),
+    2: Boolean(storeName.trim() && name.trim() && stateSel && (customCity ? city.trim() : city)),
     3: categories.length > 0,
     4: scale !== '',
     5: salesChannel && yearsInBusiness && inventoryTurnover && hasInventorySystem && orderValue,
     6: brandStyle !== ''
   };
 
+  const profileData = {
+    storeName, name, city, pin, location, storeType, categories, scale,
+    salesChannel, yearsInBusiness, inventoryTurnover,
+    hasInventorySystem: hasInventorySystem === 'Yes', orderValue,
+    brandStyle, aiFeatures
+  };
+
   if (step === TOTAL_STEPS + 1) {
-    return <EpicFinaleScreen storeName={storeName} onComplete={handleFinaleComplete} />;
+    return (
+      <SaveFlowScreen
+        storeName={storeName}
+        city={city}
+        pin={pin}
+        profileData={profileData}
+        onComplete={onComplete}
+        onDone={onDone}
+      />
+    );
   }
 
   return (
@@ -637,7 +642,7 @@ export default function OnboardingFlow({ onComplete }) {
               <span className="ob-step-label-new">Welcome</span>
               <h1 className="ob-title-new">Turn Your Products Into Professional Photoshoots</h1>
               <p className="ob-subtitle-new">Just click a simple photo → AI creates stunning model shots in seconds</p>
-              
+
               <div className="ob-demo-flow">
                 <div className="ob-demo-step">
                   <div className="ob-demo-icon">📱</div>
@@ -654,14 +659,14 @@ export default function OnboardingFlow({ onComplete }) {
                   <p>Professional model photos</p>
                 </div>
               </div>
-              
+
               <div className="ob-benefits-new">
                 <div>✓ AI-generated professional model photoshoots</div>
                 <div>✓ Auto-written product descriptions & pricing</div>
                 <div>✓ Complete catalogue built in minutes</div>
                 <div>✓ No photographer, no model, no studio needed</div>
               </div>
-              
+
               <button className="ob-btn-primary-new" onClick={handleNext}>Get Started →</button>
             </div>
           )}
@@ -672,15 +677,65 @@ export default function OnboardingFlow({ onComplete }) {
               <h1 className="ob-title-new">Tell us about your store</h1>
               <div className="ob-form-group-new">
                 <label className="ob-label-new">Store Name</label>
-                <input className="ob-input-new" placeholder="Your store name" value={storeName} maxLength={40} onChange={e => setStoreName(sanitizeName(e.target.value, 40))} />
+                <input className="ob-input-new" placeholder="Your store name" value={storeName} maxLength={40} onChange={e => setStoreName(sanitizeNameLive(e.target.value, 40))} />
               </div>
               <div className="ob-form-group-new">
                 <label className="ob-label-new">Your Name</label>
-                <input className="ob-input-new" placeholder="Your full name" value={name} maxLength={40} onChange={e => setName(sanitizeName(e.target.value, 40))} />
+                <input className="ob-input-new" placeholder="Your full name" value={name} maxLength={40} onChange={e => setName(sanitizeNameLive(e.target.value, 40))} />
               </div>
               <div className="ob-form-group-new">
-                <label className="ob-label-new">City</label>
-                <input className="ob-input-new" placeholder="e.g. Delhi" value={city} maxLength={30} onChange={e => setCity(sanitizeCity(e.target.value, 30))} />
+                <label className="ob-label-new">State / Union Territory</label>
+                <select
+                  className="ob-input-new ob-select-new"
+                  value={stateSel}
+                  onChange={(e) => handleStateChange(e.target.value)}
+                  autoComplete="address-level1"
+                >
+                  <option value="">Select your state</option>
+                  {INDIA_LOCATIONS.map((l) => (
+                    <option key={l.state} value={l.state}>{l.state}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="ob-form-row-new">
+                <div className="ob-form-group-new">
+                  <label className="ob-label-new">City</label>
+                  {customCity ? (
+                    <input
+                      className="ob-input-new"
+                      placeholder="Type your city"
+                      value={city}
+                      maxLength={30}
+                      autoFocus
+                      onChange={(e) => setCity(sanitizeCityLive(e.target.value, 30))}
+                    />
+                  ) : (
+                    <select
+                      className="ob-input-new ob-select-new"
+                      value={city}
+                      disabled={!stateSel}
+                      onChange={(e) => handleCityChange(e.target.value)}
+                      autoComplete="address-level2"
+                    >
+                      <option value="">{stateSel ? 'Select your city' : 'Pick a state first'}</option>
+                      {stateCities.map((c) => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                      <option value="__other__">Other / not listed</option>
+                    </select>
+                  )}
+                </div>
+                <div className="ob-form-group-new">
+                  <label className="ob-label-new">PIN Code</label>
+                  <input className="ob-input-new" placeholder="e.g. 110024" value={pin} maxLength={6} inputMode="numeric" autoComplete="postal-code"
+                    onChange={e => setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 6))} />
+                </div>
+              </div>
+              <div className="ob-form-group-new">
+                <label className="ob-label-new">Store Location <span className="ob-optional">(optional)</span></label>
+                <button type="button" className={`ob-loc-trigger ${location ? 'has' : ''}`} onClick={() => setShowLocModal(true)}>
+                  {location ? `📍 ${location.label}` : '📌 Add store location from Google Maps'}
+                </button>
               </div>
               <div className="ob-form-group-new">
                 <label className="ob-label-new">Store Type</label>
@@ -787,12 +842,11 @@ export default function OnboardingFlow({ onComplete }) {
             </div>
           )}
 
-
           {step === 6 && (
             <div className="ob-step-new ob-step-slide-in">
               <span className="ob-step-label-new">Step 6 of {TOTAL_STEPS}</span>
               <h1 className="ob-title-new">Choose your preferences</h1>
-              
+
               <div className="ob-prefs-section-new">
                 <label className="ob-section-label-new">Brand Style</label>
                 <div className="ob-brand-grid-new">
@@ -816,7 +870,7 @@ export default function OnboardingFlow({ onComplete }) {
                       FREE
                     </div>
                   </button>
-                  
+
                   <button className={`ob-feature-btn-new ${aiFeatures.includes('Auto-description') ? 'active' : ''}`} onClick={() => toggleAiFeature('Auto-description')}>
                     <input type="checkbox" checked={aiFeatures.includes('Auto-description')} onChange={() => {}} />
                     <span>Auto Product Descriptions</span>
@@ -825,7 +879,7 @@ export default function OnboardingFlow({ onComplete }) {
                       FREE
                     </div>
                   </button>
-                  
+
                   <button className={`ob-feature-btn-new ${aiFeatures.includes('Image-enhancement') ? 'active' : ''}`} onClick={() => toggleAiFeature('Image-enhancement')}>
                     <input type="checkbox" checked={aiFeatures.includes('Image-enhancement')} onChange={() => {}} />
                     <span>Professional Image Enhancement</span>
@@ -834,7 +888,7 @@ export default function OnboardingFlow({ onComplete }) {
                       FREE
                     </div>
                   </button>
-                  
+
                   <button className={`ob-feature-btn-new ${aiFeatures.includes('Advanced-analytics') ? 'active' : ''}`} onClick={() => toggleAiFeature('Advanced-analytics')}>
                     <input type="checkbox" checked={aiFeatures.includes('Advanced-analytics')} onChange={() => {}} />
                     <span>Advanced Sales Analytics & Insights</span>
@@ -843,7 +897,7 @@ export default function OnboardingFlow({ onComplete }) {
                       PRO
                     </div>
                   </button>
-                  
+
                   <button className={`ob-feature-btn-new ${aiFeatures.includes('Bulk-operations') ? 'active' : ''}`} onClick={() => toggleAiFeature('Bulk-operations')}>
                     <input type="checkbox" checked={aiFeatures.includes('Bulk-operations')} onChange={() => {}} />
                     <span>Bulk Product Operations</span>
@@ -874,12 +928,12 @@ export default function OnboardingFlow({ onComplete }) {
                 <div className="ob-demo-magic">✨ AI Magic ✨</div>
                 <div className="ob-demo-card">
                   <div className="ob-demo-label">AI Result</div>
-                  <img src="/assets/model_female.png" alt="AI Generated" className="ob-model-preview" />
+                  <img src={`${import.meta.env.BASE_URL}assets/model_female.png`} alt="AI Generated" className="ob-model-preview" />
                 </div>
               </div>
             </div>
           )}
-          
+
           {step === 2 && <ShopGraphic storeName={storeName} currentStep={step} />}
           {step === 3 && <ShopGraphic storeName={storeName} currentStep={step} selectedCategories={categories} />}
           {step === 4 && <ScaleBoxes selectedScale={scale} />}
@@ -889,6 +943,12 @@ export default function OnboardingFlow({ onComplete }) {
       </div>
 
       <StepDots current={step} total={TOTAL_STEPS} />
+
+      <LocationModal
+        open={showLocModal}
+        onClose={() => setShowLocModal(false)}
+        onSave={setLocation}
+      />
     </div>
   );
 }

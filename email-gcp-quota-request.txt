@@ -1,0 +1,38 @@
+Subject: Request to lift GPU quota restriction on our free-trial account — KatalogitAI
+
+Hi Google Cloud Support Team,
+
+Thank you for reviewing our GPU quota increase request for project [PROJECT NAME / PROJECT ID].
+
+We understand the suggestion to move to a partnered (reseller) billing platform, which
+would lift the restriction on our account. However, after discussing this with my
+co-founder, we have decided to stay on our current Google Cloud billing setup. As an
+early-stage startup in pre-launch development, we are deliberately running on our
+free-trial credits to keep our burn rate at zero while we build and validate our
+product and onboard our first customers. Moving to a partner platform would forfeit
+those trial credits, which are exactly what we need at this stage.
+
+We recognize that our current account usage is low — that is expected at this phase.
+We are building our core AI pipeline right now, and GPU access is needed to develop
+and test it before launch; after launch, our usage will scale with our customers.
+
+We would therefore request that you lift the quota restriction directly on our
+existing account, so we can continue using our free-trial credits to develop and
+test. We are happy to provide any additional information or documentation you need
+to approve this.
+
+Details for reference:
+- Company / Product: KatalogitAI — AI-powered fashion catalog generation for e-commerce sellers
+- Project: [project name]
+- Project ID: [project-id]
+- Billing Account ID: [billing-account-id]
+- Region: [e.g. asia-south1 (Mumbai)]
+- Machine type: [e.g. g2-standard-12 with 1x NVIDIA L4 / T4]
+- Quota requested: [e.g. 1x NVIDIA T4/L4 GPU]
+- Use case: AI image generation (Stable Diffusion / virtual try-on pipelines) for
+  generating model photoshoot images from garment flat-lay photos
+
+Best regards,
+[Your Name]
+Co-founder, KatalogitAI
+[email / phone]

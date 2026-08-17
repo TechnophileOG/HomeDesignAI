@@ -14,7 +14,14 @@
          as real response headers by vite preview, public/_headers (Netlify /
          Cloudflare Pages) and vercel.json (see repo root). -->
     <meta http-equiv="Permissions-Policy" content="camera=(self), microphone=(), geolocation=(), payment=(), usb=()" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="%BASE_URL%favicon.svg" />
+    <!-- Brand fonts — loaded as real <link> resources (NOT a CSS @import) so
+         text renders instantly in the fallback while the webfont loads.
+         display=swap guarantees typed text is never invisible while the
+         font is still downloading (the old @import caused exactly that). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" />
     <title>KatalogitAI — AI Product Photoshoots</title>
   </head>
   <body>

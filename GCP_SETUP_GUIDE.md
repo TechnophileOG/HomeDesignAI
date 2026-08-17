@@ -302,7 +302,7 @@ gcloud run deploy katalogit-api --source . --region asia-south1 \
   --no-allow-unauthenticated --min-instances 0 --max-instances 2 \
   --memory 512Mi --cpu 1 \
   --service-account katalogit-api-runner@katalogitai-501916.iam.gserviceaccount.com \
-  --set-env-vars "^|^FIREBASE_PROJECT_ID=katalogitai-501916|ADMIN_EMAILS=you@example.com|CORS_ORIGIN=https://app.yourdomain.com" \
+  --set-env-vars "^|^FIREBASE_PROJECT_ID=katalogitai-501916|OWNER_EMAIL=you@example.com|CORS_ORIGIN=https://app.yourdomain.com" \
   --set-secrets "RAZORPAY_KEY_ID=razorpay-key:latest,RAZORPAY_KEY_SECRET=razorpay-key:latest,RAZORPAY_WEBHOOK_SECRET=razorpay-webhook:latest"
 ```
 
@@ -354,7 +354,9 @@ Until then, credits can be granted by admins (the Admin Console already exists i
 - [ ] Signed-URL upload works; oversized/evil files rejected (10 MB cap, magic bytes)
 - [ ] CORS locked to your frontend origin only
 - [ ] Backups on: Cloud SQL auto-backups + PITR, GCS lifecycle on processed bucket
-- [ ] `ADMIN_EMAILS` allowlist populated for your team (both `src/api/auth.js` + `website/auth.js`)
+- [ ] `OWNER_EMAIL` = YOUR email (single owner) and `ADMIN_PASSCODE` (secret) set
+  on Cloud Run — the Owner Console needs both (see backend/.env.example). The
+  `?admin=1` deep link was removed; the console requires the passcode unlock.
 
 ---
 

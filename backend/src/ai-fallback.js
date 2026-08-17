@@ -1,20 +1,17 @@
 /* ════════════════════════════════════════════════════════════════════════
-   KatalogitAI — Vertex AI managed-API fallback (image generation)
+   KatalogitAI — Vertex AI managed engine (image generation)
    ────────────────────────────────────────────────────────────────────────
-   When the GPU box isn't configured (quota pending) or a GPU submit fails,
-   jobs render through Google's managed image model — the cheapest ACTIVE
-   lane: `gemini-3.1-flash-lite-image` (Nano Banana 2 Lite, ~$0.034 per 1K
-   image). No GPU bill, no self-hosting. The model is env-configurable.
+   THE production image lane: `gemini-3.1-flash-lite-image` (Nano Banana 2
+   Lite, ~$0.034 per image) via Vertex AI. No GPU to run or secure — billed
+   per image, model env-configurable (VERTEX_AI_MODEL).
 
-   Same contract as submitGpuJob(): returns { poses: [{poseId, index,
-   objectPath}] } so jobs.js persists the gallery identically regardless of
-   which engine produced it. Output paths are BYTE-IDENTICAL to the GPU
-   path (same store/product/pose seed), so switching engines never orphans
-   or duplicates a gallery.
+   Contract: returns { poses: [{poseId, index, objectPath}] } so jobs.js
+   persists the gallery identically regardless of engine. Output paths are
+   deterministic (same store/product/pose seed), so re-rendering never
+   orphans or duplicates a gallery.
 
-   Cost honesty: the ₹1–3/SKU target is only reachable on the self-hosted
-   GPU pipeline; this fallback keeps the product testable meanwhile. Batch
-   inference (Vertex BatchPredictionJob, ~50% off) is the next cost lever.
+   Cost note: Batch inference (Vertex BatchPredictionJob, ~50% off) is the
+   next cost lever for bulk cataloguing.
    ════════════════════════════════════════════════════════════════════════ */
 
 import { Storage } from '@google-cloud/storage';
@@ -29,7 +26,7 @@ import { AppError } from './errors.js';
 const storage = new Storage();
 const auth = new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
 
-// Pose frame — portrait 2:3, matches the GPU pipeline (512×768 → ~1K here).
+// Pose frame — portrait 2:3, matches the source resolution (512×768 → ~1K here).
 const ASPECT_RATIO = '2:3';
 
 /** Vertex generateContent endpoint for the configured model. Pure (testable). */
@@ -52,6 +49,23 @@ export const posePrompt = (product, pose) =>
 export const fallbackOutputPath = ({ storeId, productId, index, seed }) =>
   `stores/${storeId}/products/${productId}/poses/pose_${index}_${seed}.png`;
 
+/** The generateContent request payload — pure + tested so the live API
+    shape (imageConfig INSIDE generationConfig) can never silently regress. */
+export const imageRequestPayload = ({ prompt, flatLayGcsUri, flatLayMimeType }) => ({
+  contents: [{
+    role: 'user',
+    parts: [
+      { fileData: { mimeType: flatLayMimeType, fileUri: flatLayGcsUri } },
+      { text: prompt },
+    ],
+  }],
+  generationConfig: {
+    temperature: 1.0,
+    responseModalities: ['IMAGE'],
+    imageConfig: { aspectRatio: ASPECT_RATIO }, // inside generationConfig (verified against the live API)
+  },
+});
+
 /** One generateContent call → PNG bytes. Error mapping keeps job state sane. */
 async function generateOne({ prompt, flatLayGcsUri, flatLayMimeType }) {
   const token = await auth.getAccessToken();
@@ -63,17 +77,7 @@ async function generateOne({ prompt, flatLayGcsUri, flatLayMimeType }) {
     res = await fetch(vertexEndpoint(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        contents: [{
-          role: 'user',
-          parts: [
-            { fileData: { mimeType: flatLayMimeType, fileUri: flatLayGcsUri } },
-            { text: prompt },
-          ],
-        }],
-        generationConfig: { temperature: 1.0, responseModalities: ['IMAGE'] },
-        imageConfig: { aspectRatio: ASPECT_RATIO },
-      }),
+      body: JSON.stringify(imageRequestPayload({ prompt, flatLayGcsUri, flatLayMimeType })),
       signal: AbortSignal.timeout(120_000),
     });
   } catch {
@@ -123,7 +127,7 @@ async function mapLimit(items, limit, fn) {
 
 /**
  * Render every pose through Vertex AI. `deps.generate`/`deps.upload` are
- * injectable for tests. Returns the same shape as submitGpuJob().
+ * injectable for tests. Returns { poses: [{ poseId, index, objectPath }] }.
  */
 export async function generateWithVertexAi(
   { job, product },

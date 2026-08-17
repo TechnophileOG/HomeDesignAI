@@ -40,20 +40,33 @@ const stripHtml = (s) =>
     .replace(/&#?\w+;/g, ' ');
 
 /** Plain text (titles, notes, descriptions). No tags, capped length. */
-export const sanitizeText = (raw, maxLen = 120) => {
-  const cleaned = cleanControl(stripHtml(raw))
-    .replace(/\s+/g, ' ')
-    .trim();
+export const sanitizeText = (raw, maxLen = 120) =>
+  sanitizeTextLive(raw, maxLen).trim();
+
+/** LIVE-TYPING variant — same cleaning but NO trim.
+    The trimmed variant collapses a trailing space the instant you type it,
+    so "My Store" typed one key at a time becomes "MyStore". During input we
+    keep the space; values are trimmed at commit (form save / backend s()). */
+export const sanitizeTextLive = (raw, maxLen = 120) => {
+  const cleaned = cleanControl(stripHtml(raw)).replace(/\s+/g, ' ');
   return cleaned.slice(0, maxLen);
 };
 
 /** A person/store name — letters, numbers, spaces, and a few safe marks. */
 export const sanitizeName = (raw, maxLen = 60) =>
-  sanitizeText(raw, maxLen).replace(/[^a-zA-Z0-9\s.,'&()/-]/g, '');
+  sanitizeNameLive(raw, maxLen).trim();
+
+/** LIVE-TYPING name — allows the space the user is mid-typing. */
+export const sanitizeNameLive = (raw, maxLen = 60) =>
+  sanitizeTextLive(raw, maxLen).replace(/[^a-zA-Z0-9\s.,'&()/-]/g, '');
 
 /** City / location names. */
 export const sanitizeCity = (raw, maxLen = 40) =>
-  sanitizeText(raw, maxLen).replace(/[^a-zA-Z0-9\s.,'()-]/g, '');
+  sanitizeCityLive(raw, maxLen).trim();
+
+/** LIVE-TYPING city — allows the space the user is mid-typing. */
+export const sanitizeCityLive = (raw, maxLen = 40) =>
+  sanitizeTextLive(raw, maxLen).replace(/[^a-zA-Z0-9\s.,'()-]/g, '');
 
 /** Numeric string → integer, clamped to a range. Returns fallback on junk. */
 export const sanitizeInt = (raw, { min = 0, max = 999999999, fallback = 0 } = {}) => {
@@ -91,8 +104,9 @@ export const sanitizeNote = (raw, maxLen = 120) =>
 export const sanitizeImageSrc = (raw, { allowExternal = false } = {}) => {
   const s = String(raw ?? '');
   if (!s) return '';
-  if (s.startsWith('data:image/')) return s.slice(0, 2_500_000); // base64 photo cap
-  if (s.startsWith('blob:')) return s.slice(0, 2_500_000);
+  // ~14MB base64 ≈ 10MB binary — complex fabric photos need the room.
+  if (s.startsWith('data:image/')) return s.slice(0, 14_000_000);
+  if (s.startsWith('blob:')) return s.slice(0, 14_000_000);
   if (s.startsWith('/')) return s.slice(0, 500); // same-origin path
   if (allowExternal && /^https:\/\/([a-z0-9-]+\.)?(katalogit\.(ai|com|in)|gstatic\.com|googleapis\.com|cloudinary\.com|imgix\.net)\//i.test(s)) {
     return s.slice(0, 1000);
@@ -153,11 +167,34 @@ export const sanitizeProduct = (p = {}) => {
   };
 };
 
+/** Indian PIN code — exactly 6 digits. Empty string if invalid. */
+export const sanitizePin = (raw, maxLen = 8) => {
+  const digits = String(raw ?? '').replace(/[^0-9]/g, '').slice(0, maxLen);
+  return /^[0-9]{6}$/.test(digits) ? digits : '';
+};
+
+/** Store location (optional) — { label, lat, lng }. Null on junk. */
+export const sanitizeLocation = (raw) => {
+  if (!raw || typeof raw !== 'object') return null;
+  const out = {};
+  const label = sanitizeText(raw.label, 200);
+  if (label) out.label = label;
+  if (typeof raw.lat === 'number' && Number.isFinite(raw.lat) && raw.lat >= -90 && raw.lat <= 90) {
+    out.lat = Math.round(raw.lat * 1e6) / 1e6;
+  }
+  if (typeof raw.lng === 'number' && Number.isFinite(raw.lng) && raw.lng >= -180 && raw.lng <= 180) {
+    out.lng = Math.round(raw.lng * 1e6) / 1e6;
+  }
+  return Object.keys(out).length ? out : null;
+};
+
 /** Deep-clean a store profile. */
 export const sanitizeProfile = (p = {}) => ({
   storeName:   sanitizeName(p.storeName, 60) || 'My Store',
   name:        sanitizeName(p.name, 60),
   city:        sanitizeCity(p.city, 40),
+  pin:         sanitizePin(p.pin, 8),
+  location:    sanitizeLocation(p.location),
   phone:       sanitizePhone(p.phone, 15),
   email:       sanitizeEmail(p.email, 120),
   categories:  Array.isArray(p.categories)
@@ -170,6 +207,13 @@ export const sanitizeProfile = (p = {}) => ({
   survey:      Array.isArray(p.survey)
                  ? p.survey.map((a) => sanitizeText(a, 60)).filter(Boolean).slice(0, 20)
                  : [],
+  storeType:      sanitizeText(p.storeType, 40),
+  salesChannel:   sanitizeText(p.salesChannel, 40),
+  yearsInBusiness: sanitizeText(p.yearsInBusiness, 20),
+  inventoryTurnover: sanitizeText(p.inventoryTurnover, 40),
+  hasInventorySystem: Boolean(p.hasInventorySystem),
+  orderValue:     sanitizeText(p.orderValue, 40),
+  brandStyle:     sanitizeText(p.brandStyle, 40),
   createdAt:   String(p.createdAt || new Date().toISOString()).slice(0, 40),
 });
 

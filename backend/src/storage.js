@@ -9,7 +9,7 @@
 
 import { Storage } from '@google-cloud/storage';
 import { GCS_ORIGINALS_BUCKET, GCS_PROCESSED_BUCKET,
-         GCS_UPLOAD_URL_TTL_SECONDS, GCS_WORKER_URL_TTL_SECONDS } from './config.js';
+         GCS_UPLOAD_URL_TTL_SECONDS } from './config.js';
 import { badRequest, notConfigured } from './errors.js';
 
 const storage = new Storage();
@@ -18,11 +18,11 @@ const storage = new Storage();
 const BUCKETS = {
   flat_lay: GCS_ORIGINALS_BUCKET,
   ai_result: GCS_PROCESSED_BUCKET,
+  session: GCS_ORIGINALS_BUCKET, // live-session captures (phone side)
 };
 
 const cap = (sec) => Math.min(Math.max(60, sec), 3600);
 const uploadTtlMs = () => cap(GCS_UPLOAD_URL_TTL_SECONDS) * 1000;
-const workerTtlMs = () => cap(GCS_WORKER_URL_TTL_SECONDS) * 1000;
 
 async function sign(bucketName, objectPath, opts) {
   try {
@@ -47,22 +47,6 @@ export async function signedUploadUrl({ purpose, objectPath, contentType }) {
     contentLengthRange: [1, MAX_UPLOAD_BYTES],
   });
   return { uploadUrl, objectPath, bucket: bucketName };
-}
-
-/** Generic signed read URL (used to hand the GPU box a private photo). */
-export async function signedReadUrl(bucketName, objectPath) {
-  const [url] = await sign(bucketName, objectPath, {
-    action: 'read', version: 'v4', expires: Date.now() + workerTtlMs(),
-  });
-  return url;
-}
-
-/** Generic signed PUT URL (used to let the GPU box write AI results). */
-export async function signedPutUrl(bucketName, objectPath, contentType) {
-  const [url] = await sign(bucketName, objectPath, {
-    action: 'write', version: 'v4', expires: Date.now() + workerTtlMs(), contentType,
-  });
-  return url;
 }
 
 /** Confirm an object actually exists (guards product creation with real uploads). */

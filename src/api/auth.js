@@ -9,7 +9,8 @@
      • Passwords NEVER touch our servers — sign-in happens in the Firebase
        SDK against Google's Identity Platform over TLS.
      • `isAdmin` is NEVER decided client-side: it comes from the server's
-       ADMIN_EMAILS allowlist via GET /me and is merged into the session.
+       OWNER_EMAIL check via GET /me and is merged into the session. The
+       Owner Console additionally requires the passcode unlock session.
      • The ID token is short-lived (~1h); client.js refreshes it before every
        API call via getToken() (Firebase auto-refreshes).
    ════════════════════════════════════════════════════════════════════════════ */
@@ -19,7 +20,6 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   GoogleAuthProvider,
-  sendPasswordResetEmail,
   sendEmailVerification,
   reload as fbReload,
   signOut as fbSignOut,
@@ -126,9 +126,10 @@ export const auth = {
     try {
       const cred = await createUserWithEmailAndPassword(fbAuth, cleanEmail, pw);
       try { await updateProfile(cred.user, { displayName: cleanName }); } catch { /* non-fatal */ }
-      // Send the verification email right away (non-fatal if it fails — the
-      // user can resend from the verify step).
-      try { await sendEmailVerification(cred.user); } catch { /* resend available */ }
+      // Send the verification email right away — through OUR backend (branded
+      // + rate-limited); falls back to the Firebase SDK if the route is down.
+      try { await api.sendVerificationEmail(); }
+      catch { try { await sendEmailVerification(cred.user); } catch { /* resend available */ } }
       const session = await toSession(cred.user);
       session.name = cleanName;
       await api.saveSession(session);
@@ -138,17 +139,29 @@ export const auth = {
     }
   },
 
-  /** Re-send the verification email to the current user. */
+  /** Re-send the verification email — through OUR backend (branded email +
+      per-user rate limiting); falls back to the Firebase SDK on failure so
+      the flow can never dead-end. */
   async sendVerification() {
     const u = fbAuth.currentUser;
     if (!u) return { ok: false, error: 'No active session.' };
     try {
-      await sendEmailVerification(u);
+      await api.sendVerificationEmail();
       return { ok: true };
     } catch (err) {
-      const c = err?.code || '';
-      if (c === 'auth/too-many-requests') return { ok: false, error: 'Too many requests. Try again in a few minutes.' };
-      return { ok: false, error: friendly(err) };
+      if (err?.code === 'RATE_LIMITED') {
+        return { ok: false, error: 'Too many requests. Try again in an hour.' };
+      }
+      try {
+        await sendEmailVerification(u);
+        return { ok: true };
+      } catch (err2) {
+        const c = err2?.code || '';
+        if (c === 'auth/too-many-requests') {
+          return { ok: false, error: 'Too many requests. Try again in a few minutes.' };
+        }
+        return { ok: false, error: friendly(err2) };
+      }
     }
   },
 
@@ -179,17 +192,21 @@ export const auth = {
     }
   },
 
-  /** Send a password-reset email (generic reply — no account enumeration). */
+  /** Send a password-reset email — routed through OUR backend so it is
+      RATE-LIMITED server-side (per IP + per email) and audit-logged. The
+      Firebase SDK's direct call had no limits of its own, which let a
+      spammed "forgot password" button drop 10+ emails. Reply is generic
+      either way — no account enumeration. */
   async sendPasswordReset(email) {
     const cleanEmail = sanitizeEmail(email);
     if (!cleanEmail) return { ok: false, error: 'Enter a valid email address.' };
     try {
-      // firebase-auth returns 200 even for unknown addresses when the
-      // 'email enumeration protection' setting is on; we reply generically
-      // either way so attackers can't probe which emails have accounts.
-      await sendPasswordResetEmail(fbAuth, cleanEmail);
+      await api.sendPasswordResetEmail(cleanEmail);
       return { ok: true };
-    } catch {
+    } catch (err) {
+      if (err?.code === 'RATE_LIMITED') {
+        return { ok: false, error: 'Too many reset requests. Please wait a few minutes.' };
+      }
       // Deliberately identical reply — never reveal whether an account exists.
       return { ok: false, error: 'If an account exists for that email, a reset link is on its way.' };
     }

@@ -47,9 +47,9 @@
     "applicationCategory": "BusinessApplication",
     "offers": {
       "@type": "Offer",
-      "price": "15",
+      "price": "14",
       "priceCurrency": "INR",
-      "description": "Approximate cost per product photoshoot at the 50-credit pack (3 credits per shoot)"
+      "description": "Approximate cost per product photoshoot at the 1000-credit pack (3 credits per shoot)"
     }
   }
   </script>
@@ -93,7 +93,19 @@
   <nav class="navbar" id="navbar">
     <div class="nav-container">
       <a href="#" class="nav-logo">
-        <span class="logo-icon">📸</span>
+        <svg class="logo-k" viewBox="0 0 140 150" aria-hidden="true">
+          <defs>
+            <linearGradient id="klogoShirt" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1d8a5c" /><stop offset="100%" stop-color="#0f6240" /></linearGradient>
+            <linearGradient id="klogoSleeve" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#fdf3e4" /><stop offset="100%" stop-color="#eecba2" /></linearGradient>
+          </defs>
+          <path d="M 54 56 L 118 22 L 130 36 L 60 72 Z" fill="url(#klogoSleeve)" stroke="#d9a06b" stroke-width="1.5" stroke-linejoin="round" />
+          <rect x="116" y="20" width="20" height="13" rx="5.5" transform="rotate(-48 126 27)" fill="#fdf3e4" stroke="#d9a06b" stroke-width="1.5" />
+          <path d="M 86 66 L 130 100 L 120 112 L 78 78 Z" fill="url(#klogoSleeve)" stroke="#d9a06b" stroke-width="1.5" stroke-linejoin="round" />
+          <rect x="116" y="98" width="20" height="13" rx="5.5" transform="rotate(48 126 105)" fill="#fdf3e4" stroke="#d9a06b" stroke-width="1.5" />
+          <rect x="58" y="28" width="24" height="102" rx="11" fill="url(#klogoShirt)" />
+          <circle cx="70" cy="36" r="9" fill="#0a3d28" stroke="#fdf3e4" stroke-width="2.5" />
+          <path d="M 63 43 Q 70 51 77 43" stroke="#fdf3e4" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.9" />
+        </svg>
         KatalogitAI
       </a>
       <ul class="nav-links">
@@ -135,7 +147,7 @@
           <div class="hero-points">
             <div class="hero-point">
               <span class="point-icon">✓</span>
-              <span>From ₹15 per product</span>
+              <span>From ₹14 per product</span>
             </div>
             <div class="hero-point">
               <span class="point-icon">✓</span>
@@ -273,7 +285,7 @@
             </div>
             <div class="comparison-cost">
               <div class="cost-label">Total Cost:</div>
-              <div class="cost-value good">From ₹15 per item</div>
+              <div class="cost-value good">From ₹14 per item</div>
               <div class="cost-time">Ready the same day ⚡</div>
             </div>
           </div>
@@ -345,8 +357,8 @@
             <h3>Built for real catalogues</h3>
             <ul class="value-list">
               <li><span class="feat-icon">✓</span> <strong>8 poses per product</strong> — one consistent model across your whole catalogue</li>
-              <li><span class="feat-icon">✓</span> <strong>Pay per shoot</strong> — 3 credits per photoshoot, no monthly fee</li>
-              <li><span class="feat-icon">✓</span> <strong>From ₹15 per product</strong> — vs ₹500+ for a traditional shoot</li>
+              <li><span class="feat-icon">✓</span> <strong>Pay per shoot</strong> — 3 credits per photoshoot, or ₹499/mo Pro</li>
+              <li><span class="feat-icon">✓</span> <strong>From ₹14 per product</strong> — vs ₹500+ for a traditional shoot</li>
               <li><span class="feat-icon">✓</span> <strong>Your photos stay yours</strong> — private per-store storage, server-side protected</li>
               <li><span class="feat-icon">✓</span> <strong>Start with 10 free credits</strong> — no credit card required</li>
             </ul>
@@ -408,13 +420,32 @@
       
       <div class="pricing-grid">
         
+        <div class="pricing-card pricing-popular">
+          <div class="pricing-badge">Best Value 🔥</div>
+          <div class="pricing-header">
+            <h3 class="pricing-name">Pro Subscription</h3>
+            <div class="pricing-price">
+              <span class="currency">₹</span>499<span class="unit">/month</span>
+            </div>
+            <p class="pricing-desc">40 credits every month · priority queue</p>
+          </div>
+          <ul class="pricing-features">
+            <li><span class="feat-icon">✓</span> 40 credits/month (~13 shoots)</li>
+            <li><span class="feat-icon">✓</span> Priority AI processing</li>
+            <li><span class="feat-icon">✓</span> 20% off top-up packs</li>
+            <li><span class="feat-icon">✓</span> Phone + WhatsApp support</li>
+            <li><span class="feat-icon">✓</span> Cancel anytime</li>
+          </ul>
+          <a href="#contact" class="btn-pricing btn-pricing-popular">Start Free Trial →</a>
+        </div>
+        
         <div class="pricing-card">
           <div class="pricing-header">
             <h3 class="pricing-name">Starter</h3>
             <div class="pricing-price">
-              <span class="currency">₹</span>249<span class="unit">/50 credits</span>
+              <span class="currency">₹</span>349<span class="unit">/50 credits</span>
             </div>
-            <p class="pricing-desc">≈ ₹15 per photoshoot · ~16 shoots</p>
+            <p class="pricing-desc">≈ ₹21 per photoshoot · ~16 shoots</p>
           </div>
           <ul class="pricing-features">
             <li><span class="feat-icon">✓</span> 8 professional poses per product</li>
@@ -426,14 +457,13 @@
           <a href="#contact" class="btn-pricing">Get Started →</a>
         </div>
         
-        <div class="pricing-card pricing-popular">
-          <div class="pricing-badge">Most Popular 🔥</div>
+        <div class="pricing-card">
           <div class="pricing-header">
             <h3 class="pricing-name">Growth</h3>
             <div class="pricing-price">
-              <span class="currency">₹</span>499<span class="unit">/120 credits</span>
+              <span class="currency">₹</span>699<span class="unit">/120 credits</span>
             </div>
-            <p class="pricing-desc">≈ ₹12.5 per photoshoot · ~40 shoots</p>
+            <p class="pricing-desc">≈ ₹17.5 per photoshoot · ~40 shoots</p>
           </div>
           <ul class="pricing-features">
             <li><span class="feat-icon">✓</span> Everything in Starter</li>
@@ -442,16 +472,16 @@
             <li><span class="feat-icon">✓</span> Phone + WhatsApp support</li>
             <li><span class="feat-icon">✓</span> Free shot regenerations</li>
           </ul>
-          <a href="#contact" class="btn-pricing btn-pricing-popular">Start Free Trial →</a>
+          <a href="#contact" class="btn-pricing">Get Started →</a>
         </div>
         
         <div class="pricing-card">
           <div class="pricing-header">
             <h3 class="pricing-name">Pro</h3>
             <div class="pricing-price">
-              <span class="currency">₹</span>999<span class="unit">/300 credits</span>
+              <span class="currency">₹</span>1,499<span class="unit">/300 credits</span>
             </div>
-            <p class="pricing-desc">≈ ₹10 per photoshoot · ~100 shoots</p>
+            <p class="pricing-desc">≈ ₹15 per photoshoot · ~100 shoots</p>
           </div>
           <ul class="pricing-features">
             <li><span class="feat-icon">✓</span> Everything in Growth</li>
@@ -460,7 +490,25 @@
             <li><span class="feat-icon">✓</span> Dedicated support</li>
             <li><span class="feat-icon">✓</span> White-label branding option</li>
           </ul>
-          <a href="#contact" class="btn-pricing">Contact Sales →</a>
+          <a href="#contact" class="btn-pricing">Get Started →</a>
+        </div>
+
+        <div class="pricing-card">
+          <div class="pricing-header">
+            <h3 class="pricing-name">Bulk</h3>
+            <div class="pricing-price">
+              <span class="currency">₹</span>4,499<span class="unit">/1000 credits</span>
+            </div>
+            <p class="pricing-desc">≈ ₹13.5 per photoshoot · ~330 shoots</p>
+          </div>
+          <ul class="pricing-features">
+            <li><span class="feat-icon">✓</span> Everything in Pro</li>
+            <li><span class="feat-icon">✓</span> Lowest per-shoot rate</li>
+            <li><span class="feat-icon">✓</span> Bulk catalogue imports</li>
+            <li><span class="feat-icon">✓</span> Dedicated support</li>
+            <li><span class="feat-icon">✓</span> For growing catalogues</li>
+          </ul>
+          <a href="#contact" class="btn-pricing">Get Started →</a>
         </div>
         
       </div>
@@ -537,7 +585,19 @@
       <div class="footer-content">
         <div class="footer-brand">
           <div class="footer-logo">
-            <span class="logo-icon">📸</span>
+            <svg class="logo-k" viewBox="0 0 140 150" aria-hidden="true">
+              <defs>
+                <linearGradient id="klogoShirtF" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1d8a5c" /><stop offset="100%" stop-color="#0f6240" /></linearGradient>
+                <linearGradient id="klogoSleeveF" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#fdf3e4" /><stop offset="100%" stop-color="#eecba2" /></linearGradient>
+              </defs>
+              <path d="M 54 56 L 118 22 L 130 36 L 60 72 Z" fill="url(#klogoSleeveF)" stroke="#d9a06b" stroke-width="1.5" stroke-linejoin="round" />
+              <rect x="116" y="20" width="20" height="13" rx="5.5" transform="rotate(-48 126 27)" fill="#fdf3e4" stroke="#d9a06b" stroke-width="1.5" />
+              <path d="M 86 66 L 130 100 L 120 112 L 78 78 Z" fill="url(#klogoSleeveF)" stroke="#d9a06b" stroke-width="1.5" stroke-linejoin="round" />
+              <rect x="116" y="98" width="20" height="13" rx="5.5" transform="rotate(48 126 105)" fill="#fdf3e4" stroke="#d9a06b" stroke-width="1.5" />
+              <rect x="58" y="28" width="24" height="102" rx="11" fill="url(#klogoShirtF)" />
+              <circle cx="70" cy="36" r="9" fill="#0a3d28" stroke="#fdf3e4" stroke-width="2.5" />
+              <path d="M 63 43 Q 70 51 77 43" stroke="#fdf3e4" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.9" />
+            </svg>
             KatalogitAI
           </div>
           <p>Visual commerce infrastructure for Indian retail</p>
@@ -562,7 +622,21 @@
     <div class="auth-modal-box">
       <button class="auth-close" aria-label="Close">&times;</button>
       <div class="auth-head">
-        <div class="auth-logo"><span class="logo-icon">📸</span> KatalogitAI</div>
+        <div class="auth-logo">
+          <svg class="logo-k" viewBox="0 0 140 150" aria-hidden="true">
+            <defs>
+              <linearGradient id="klogoShirtM" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#1d8a5c" /><stop offset="100%" stop-color="#0f6240" /></linearGradient>
+            </defs>
+            <path d="M 54 56 L 118 22 L 130 36 L 60 72 Z" fill="url(#klogoSleeve)" stroke="#d9a06b" stroke-width="1.5" stroke-linejoin="round" />
+            <rect x="116" y="20" width="20" height="13" rx="5.5" transform="rotate(-48 126 27)" fill="#fdf3e4" stroke="#d9a06b" stroke-width="1.5" />
+            <path d="M 86 66 L 130 100 L 120 112 L 78 78 Z" fill="url(#klogoSleeve)" stroke="#d9a06b" stroke-width="1.5" stroke-linejoin="round" />
+            <rect x="116" y="98" width="20" height="13" rx="5.5" transform="rotate(48 126 105)" fill="#fdf3e4" stroke="#d9a06b" stroke-width="1.5" />
+            <rect x="58" y="28" width="24" height="102" rx="11" fill="url(#klogoShirtM)" />
+            <circle cx="70" cy="36" r="9" fill="#0a3d28" stroke="#fdf3e4" stroke-width="2.5" />
+            <path d="M 63 43 Q 70 51 77 43" stroke="#fdf3e4" stroke-width="2" fill="none" stroke-linecap="round" opacity="0.9" />
+          </svg>
+          KatalogitAI
+        </div>
         <h3 class="auth-title">Seller Access</h3>
         <p class="auth-sub">Sign in to your store dashboard.</p>
       </div>

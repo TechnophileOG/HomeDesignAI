@@ -18,10 +18,20 @@ const fail = (label) => { throw badRequest('INVALID_FIELD', `Invalid ${label}.`)
 
 /* ── scalars ─────────────────────────────────────────────────────────── */
 
-/** Required non-empty string, trimmed, control-chars removed, length-capped. */
+/** Required non-empty string, trimmed, control-chars + markup removed,
+    length-capped. Matches the frontend sanitizer (defense in depth): tags,
+    event handlers and dangerous URI schemes are never legitimate in free
+    text, and React/CSV escaping is the second layer on top of this. */
 export const s = (v, { max = 200, label = 'value' } = {}) => {
   if (typeof v !== 'string') fail(label);
-  const clean = v.replace(CONTROL_CHARS, '').trim();
+  const clean = v
+    .replace(CONTROL_CHARS, '')
+    .replace(/<[^>]*>/g, ' ')         // markup tags → space
+    .replace(/javascript:/gi, '')     // dangerous URI scheme
+    .replace(/on\w+\s*=/gi, '')      // inline event handlers
+    .replace(/&#?[\w]+;/g, ' ')       // HTML entities → space
+    .replace(/\s+/g, ' ')             // collapse whitespace
+    .trim();
   if (!clean) fail(label);
   if (clean.length > max) fail(label);
   return clean;
@@ -108,7 +118,7 @@ export const objectPath = (v, { label = 'path' } = {}) => {
  * stores/{storeId}/... This is the ONLY variant used for client-supplied
  * photo references (product flatLay/gallery/aiResults, job photoPath). A
  * generic path check would let a user reference ANOTHER store's photo — the
- * GPU worker then fetches it with service-account-signed URLs, bypassing
+ * engine then fetches it with service-account-signed URLs, bypassing
  * storage rules (cross-tenant data exposure).
  */
 export const objectPathFor = (v, storeId, { label = 'path' } = {}) => {
@@ -199,7 +209,26 @@ export const productPatch = (raw, storeId) => {
   return clean;
 };
 
-const STORE_KEYS = ['id', 'name', 'city', 'categories', 'scale', 'aiFeatures',
+/** Indian PIN code — exactly 6 digits. */
+export const pinCode = (v, { label = 'PIN' } = {}) => {
+  const clean = s(v, { max: 8, label });
+  if (!/^[0-9]{6}$/.test(clean)) fail(label);
+  return clean;
+};
+
+/** Optional store location — { label?, lat?, lng? }, whitelisted keys. */
+export const storeLocation = (v) => {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== 'object' || Array.isArray(v)) fail('location');
+  const out = {};
+  if (v.label !== undefined) out.label = s(v.label, { max: 200, label: 'location label' });
+  // ~6 decimals ≈ 10cm precision — enough for a storefront, strict bounds.
+  if (v.lat !== undefined) out.lat = num(v.lat, { min: -90, max: 90, decimals: 6, label: 'latitude' });
+  if (v.lng !== undefined) out.lng = num(v.lng, { min: -180, max: 180, decimals: 6, label: 'longitude' });
+  return Object.keys(out).length ? out : undefined;
+};
+
+const STORE_KEYS = ['id', 'name', 'city', 'pin', 'location', 'categories', 'scale', 'aiFeatures',
   'salesChannel', 'yearsInBusiness', 'inventoryTurnover', 'hasInventorySystem',
   'orderValue', 'brandStyle', 'storeType'];
 
@@ -213,6 +242,8 @@ export const store = (raw) => {
       case 'id':            out.id = id(raw[key], { max: 48, label: 'store id' }); break;
       case 'name':          out.name = s(raw[key], { max: 60, label: 'store name' }); break;
       case 'city':          out.city = s(raw[key], { max: 40, label: 'city' }); break;
+      case 'pin':           out.pin = raw[key] === '' ? '' : pinCode(raw[key]); break; // '' clears, else must be 6 digits
+      case 'location':      { const loc = storeLocation(raw[key]); if (loc) out.location = loc; break; }
       case 'categories':    out.categories = strArr(raw[key], { itemMax: 40, maxItems: 20, label: 'categories' }); break;
       case 'aiFeatures':    out.aiFeatures = strArr(raw[key], { itemMax: 40, maxItems: 20, label: 'aiFeatures' }); break;
       case 'salesChannel':  out.salesChannel = so(raw[key], { max: 40, label: 'salesChannel' }); break;
@@ -239,6 +270,62 @@ export const jobCreate = (raw, storeId) => {
       : (storeId ? objectPathFor(raw.photoPath, storeId) : objectPath(raw.photoPath)),
   };
 };
+
+/* ── live cataloging sessions ─────────────────────────────────────────── */
+
+/** A minted join/device token: exactly 64 lowercase hex chars. */
+export const sessionToken = (v, { label = 'token' } = {}) => {
+  if (typeof v !== 'string' || !/^[0-9a-f]{64}$/.test(v)) fail(label);
+  return v;
+};
+
+/** Short device display name — plain text, capped, sanitized. */
+export const deviceName = (v, { label = 'device name' } = {}) =>
+  s(v, { max: 40, label });
+
+/** Session photos are streamed straight to GCS via signed URLs (a 10MB
+    photo as base64 far exceeds Firestore's 1MB document limit — storing the
+    bytes in Firestore is impossible and wasteful). The joined phone requests
+    a signed PUT URL with photo METADATA, uploads the bytes to GCS, then
+    confirms; Firestore holds only a tiny reference doc. */
+
+/** Photo metadata for the upload-stage call: type whitelist + 10MB cap. */
+export const sessionPhotoMeta = (v, { label = 'photo' } = {}) => {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) fail(label);
+  return {
+    mime: oneOf(v.mime, ['image/jpeg', 'image/png', 'image/webp'], { label: 'photo type' }),
+    size: int(v.size, { min: 1, max: 10 * 1024 * 1024, label: 'photo size' }), // ≤10MB
+    index: int(v.index, { min: 0, max: 99999, label: 'photo index' }),
+  };
+};
+
+/** Confirm body (after the phone uploaded the bytes to GCS). */
+export const sessionPhotoConfirm = (v, { label = 'photo' } = {}) => {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) fail(label);
+  return {
+    mime: oneOf(v.mime, ['image/jpeg', 'image/png', 'image/webp'], { label: 'photo type' }),
+    size: int(v.size, { min: 1, max: 10 * 1024 * 1024, label: 'photo size' }),
+    index: int(v.index, { min: 0, max: 99999, label: 'photo index' }),
+  };
+};
+
+/** Create-session body (owner side). */
+export const sessionCreate = (raw) => {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) fail('session');
+  return { title: so(raw.title, { max: 80, label: 'session title' }) };
+};
+
+/** Join body (scanning phone): single-use join token + device name. */
+export const sessionJoin = (raw) => {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) fail('join');
+  return {
+    token: sessionToken(raw.token, { label: 'join token' }),
+    deviceName: deviceName(raw.deviceName || 'Phone'),
+  };
+};
+
+/** Photo-upload body (joined device) — metadata only; bytes go to GCS. */
+export const sessionPhotoUpload = (raw) => sessionPhotoMeta(raw);
 
 /** Top-up order body. */
 export const orderCreate = (raw) => {
@@ -293,4 +380,41 @@ export const notification = (raw) => {
     message: s(raw.message, { max: 300, label: 'message' }),
     balance: num(raw.balance ?? 0, { min: 0, max: 100000000, label: 'balance' }),
   };
+};
+
+/** URL for a CTA — http(s) absolute or same-origin path only. */
+export const safeUrl = (v, { label = 'url' } = {}) => {
+  if (v === undefined || v === null) return undefined;
+  const clean = s(v, { max: 300, label });
+  if (/^https?:\/\/[^\s<>"']+$/.test(clean) || clean.startsWith('/')) return clean;
+  fail(label);
+};
+
+/** Admin-created carousel banner (the home-screen slide deck). */
+export const banner = (raw) => {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) fail('banner');
+  const out = {};
+  if (raw.title !== undefined) out.title = s(raw.title, { max: 80, label: 'banner title' });
+  if (raw.subtitle !== undefined) out.subtitle = so(raw.subtitle, { max: 200, label: 'banner subtitle' }) || '';
+  if (raw.badge !== undefined) out.badge = so(raw.badge, { max: 30, label: 'banner badge' }) || '';
+  if (raw.ctaText !== undefined) out.ctaText = so(raw.ctaText, { max: 40, label: 'banner CTA text' }) || '';
+  if (raw.ctaUrl !== undefined) { const u = safeUrl(raw.ctaUrl, { label: 'banner CTA url' }); if (u) out.ctaUrl = u; }
+  if (raw.theme !== undefined) out.theme = oneOf(raw.theme, [1, 2, 3], { label: 'banner theme' });
+  if (raw.enabled !== undefined) out.enabled = bool(raw.enabled, { label: 'banner enabled' });
+  if (raw.order !== undefined) out.order = int(raw.order, { min: 0, max: 1000, label: 'banner order' });
+  return out;
+};
+
+/** Admin-created announcement (the in-app notification bell). */
+export const announcement = (raw) => {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) fail('announcement');
+  const out = {};
+  if (raw.title !== undefined) out.title = s(raw.title, { max: 100, label: 'announcement title' });
+  if (raw.message !== undefined) out.message = s(raw.message, { max: 500, label: 'announcement message' });
+  if (raw.type !== undefined) out.type = oneOf(raw.type, ['info', 'promo', 'maintenance'], { label: 'announcement type' });
+  if (raw.enabled !== undefined) out.enabled = bool(raw.enabled, { label: 'announcement enabled' });
+  if (raw.expiresAt !== undefined) {
+    out.expiresAt = int(raw.expiresAt, { min: 0, max: 4102444800000, label: 'expiresAt' }); // year 2100 cap
+  }
+  return out;
 };

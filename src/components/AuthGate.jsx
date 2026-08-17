@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, Lock, User as UserIcon, ShieldCheck, ArrowRight, XCircle, MailCheck, KeyRound, RotateCcw } from 'lucide-react';
+import { Lock, User as UserIcon, ArrowRight, XCircle, MailCheck, KeyRound, RotateCcw } from 'lucide-react';
 import { auth } from '../api/auth';
+import KatalogitLogo from './KatalogitLogo';
 
 /* ════════════════════════════════════════════════════════════════════════════
    AuthGate — the app requires a valid session to render.
@@ -17,6 +18,9 @@ export default function AuthGate({ onAuthed, initialVerifyEmail = '' }) {
   const [info, setInfo]     = useState('');
   const [busy, setBusy]     = useState(false);
   const [fields, setFields] = useState({});
+  // forgot-password anti-spam: 60s cooldown + hard cap per session
+  const [forgotCooldown, setForgotCooldown] = useState(0);
+  const forgotSendsRef = useRef(0);
   // verify step — shown until the user's email is verified
   const [verifyEmail, setVerifyEmail] = useState(initialVerifyEmail);
   const [resendSent, setResendSent]   = useState(!!initialVerifyEmail);
@@ -60,7 +64,20 @@ export default function AuthGate({ onAuthed, initialVerifyEmail = '' }) {
     if (mode === 'forgot') {
       const res = await auth.sendPasswordReset(fields.email);
       setBusy(false);
-      setInfo(res.ok ? 'If an account exists for that email, a reset link is on its way.' : res.error);
+      if (res.ok) {
+        forgotSendsRef.current += 1;
+        setInfo(res.error || 'If an account exists for that email, a reset link is on its way.');
+        // Button cooldown — one reset email per minute, max 3 per session.
+        setForgotCooldown(60);
+        const id = setInterval(() => {
+          setForgotCooldown((s) => {
+            if (s <= 1) { clearInterval(id); return 0; }
+            return s - 1;
+          });
+        }, 1000);
+      } else {
+        setError(res.error);
+      }
       return;
     }
     const res = mode === 'signin'
@@ -122,8 +139,7 @@ export default function AuthGate({ onAuthed, initialVerifyEmail = '' }) {
       <div className="ag-wrap">
         <div className="ag-card">
           <div className="ag-brand">
-            <div className="ag-brand-icon"><Sparkles size={20} /></div>
-            <span className="ag-brand-name">KatalogitAI</span>
+            <KatalogitLogo tone="dark" />
           </div>
           <div className="ag-verify-icon"><MailCheck size={26} /></div>
           <h2 className="ag-title">Verify your email</h2>
@@ -169,8 +185,7 @@ export default function AuthGate({ onAuthed, initialVerifyEmail = '' }) {
     <div className="ag-wrap">
       <div className="ag-card">
         <div className="ag-brand">
-          <div className="ag-brand-icon"><Sparkles size={20} /></div>
-          <span className="ag-brand-name">KatalogitAI</span>
+          <KatalogitLogo tone="dark" />
         </div>
 
         {mode === 'forgot' ? (
@@ -186,8 +201,18 @@ export default function AuthGate({ onAuthed, initialVerifyEmail = '' }) {
               {error && (
                 <div className="ag-error" role="alert"><XCircle size={13} /> {error}</div>
               )}
-              <button className="ag-submit" type="submit" disabled={busy}>
-                {busy ? <><span className="ai-spinner" style={{ width: 14, height: 14 }} /> Sending…</> : <>Send reset link <ArrowRight size={15} /></>}
+              <button
+                className="ag-submit"
+                type="submit"
+                disabled={busy || forgotCooldown > 0 || forgotSendsRef.current >= 3}
+              >
+                {busy
+                  ? <><span className="ai-spinner" style={{ width: 14, height: 14 }} /> Sending…</>
+                  : forgotCooldown > 0
+                    ? <>Resend available in {forgotCooldown}s</>
+                    : forgotSendsRef.current >= 3
+                      ? 'Limit reached — try again later'
+                      : <>Send reset link <ArrowRight size={15} /></>}
               </button>
             </form>
             <button className="ag-link" type="button" onClick={() => switchMode('signin')}>
@@ -228,7 +253,7 @@ export default function AuthGate({ onAuthed, initialVerifyEmail = '' }) {
               {input('password', 'Password', 'password', '••••••••', mode === 'signin' ? 'current-password' : 'new-password')}
               {mode === 'signup' && (
                 <p className="ag-hint" style={{ lineHeight: 1.5 }}>
-                  <ShieldCheck size={12} /> 8+ characters with letters & numbers. Passwords are hashed — never stored in plain text.
+                  8+ characters with letters &amp; numbers.
                 </p>
               )}
 

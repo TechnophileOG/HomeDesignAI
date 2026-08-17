@@ -26,6 +26,11 @@ import { coreRouter } from './routes/core.js';
 import { creditsRouter, webhookRouter } from './routes/credits.js';
 import { jobsRouter, workerRouter } from './routes/jobs.js';
 import { publicRouter, adminLeadsRouter } from './routes/leads.js';
+import { geocodeRouter } from './routes/geocode.js';
+import { meRouter } from './routes/me.js';
+import { contentRouter, adminContentRouter } from './routes/content.js';
+import { sessionsRouter, sessionsPublicRouter } from './routes/sessions.js';
+import { adminRouter } from './routes/admin.js';
 
 assertConfig();
 
@@ -70,7 +75,9 @@ app.use(cors({
     return cb(null, false); // no ACAO header → browser blocks the response
   },
   methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  // x-admin-session = the short-lived owner-console unlock token. Without it
+  // in the preflight allowlist, browsers BLOCK every admin call cross-origin.
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-admin-session'],
   maxAge: 86400,
   credentials: false,
 }));
@@ -107,6 +114,9 @@ app.get('/healthz', health);
 app.use('/api/v1/webhooks', webhookRouter);
 app.use('/api/v1/workers', workerRouter);
 app.use('/api/v1/public', publicRouter);
+// Live session JOIN + photo uploads — the scanning phone has no account,
+// so these authenticate via single-use join token / per-device token.
+app.use('/api/v1/public', sessionsPublicRouter);
 
 /* ── v1 — everything else requires a valid Firebase ID token ──────────── */
 const v1 = express.Router();
@@ -115,8 +125,15 @@ v1.use(requireAuth);
 v1.use('/', coreRouter);
 v1.use('/', creditsRouter);
 v1.use('/', jobsRouter);
-// Admin-only leads listing (requireAdmin, inside the auth gate).
+v1.use('/', geocodeRouter);
+v1.use('/', meRouter);
+v1.use('/', contentRouter);
+v1.use('/', sessionsRouter);
+// Owner-console unlock (auth-gated; issues the short-lived admin session)
+// + all admin-only routes (requireAdmin, inside the auth gate).
+v1.use('/', adminRouter);
 v1.use('/', adminLeadsRouter);
+v1.use('/', adminContentRouter);
 
 app.use('/api/v1', v1);
 

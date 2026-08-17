@@ -4,23 +4,27 @@
    POST /jobs  → quota check → ATOMIC credit reservation (idempotent by job
                  id) → Firestore job record → Cloud Tasks enqueue (optional)
    GET  /jobs/{id} → poll status
-   POST /workers/run-job → the queue worker. Today it is an honest stub —
-     the AI pipeline (AI_PIPELINE_PLAN.md) plugs in here later. The endpoint
-     only accepts requests carrying a Cloud Tasks OIDC token or the shared
-     worker secret — nobody else can drive it.
+   POST /workers/run-job → the queue worker. Runs the real pipeline via the
+     managed Vertex AI engine (Nano Banana 2 Lite images + Gemini listing text)
+     when VERTEX_AI_LOCATION is set; otherwise jobs stay 'queued' honestly.
+     The endpoint only accepts requests carrying a Cloud Tasks OIDC token or
+     the shared worker secret — nobody else can drive it.
    ════════════════════════════════════════════════════════════════════════ */
 
 import { Router } from 'express';
+import { OAuth2Client } from 'google-auth-library';
 import { db, jobsColl, productsColl, storeRef, now, snap } from '../db.js';
 import { jobCreate, id as cleanId } from '../validate.js';
 import { reserveCredits, refundCredits } from '../ledger.js';
 import { CREDIT_PRICING, JOB_QUOTA, WORKER_URL, WORKER_AUTH_TOKEN, TASKS_QUEUE,
-         GPU_HOST_URL, GPU_AUTH_TOKEN, vertexConfigured, AI_ENGINE } from '../config.js';
+         vertexConfigured, textAiConfigured,
+         VERTEX_AI_MODEL, VERTEX_TEXT_MODEL } from '../config.js';
 import { badRequest, notFound, forbidden } from '../errors.js';
 import { userLimiter } from '../rate-limit.js';
-import { requireStoreOwner } from './owners.js';
-import { submitGpuJob, pollGpuJob, POSE_LIST } from '../ai-client.js';
+import { requireOwnStore } from './owners.js';
+import { POSE_LIST } from '../ai-client.js';
 import { generateWithVertexAi } from '../ai-fallback.js';
+import { generateListingText } from '../ai-text.js';
 
 // Tighter per-user cap on job creation (anti-abuse on the paid path).
 const createJobLimiter = userLimiter({ windowMs: 60 * 60 * 1000, limit: 20, message: 'Job limit reached. Try again later.' });
@@ -51,7 +55,7 @@ export const jobsRouter = Router();
 const genJobId = () => `job-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
 // POST /jobs — create a job. Reserves credits atomically (402 if broke).
-jobsRouter.post('/jobs', createJobLimiter, requireStoreOwner, async (req, res, next) => {
+jobsRouter.post('/jobs', createJobLimiter, requireOwnStore, async (req, res, next) => {
   try {
     // storeId scopes photoPath to this store (cross-tenant guard).
     const body = jobCreate(req.body || {}, req.store.id);
@@ -105,10 +109,25 @@ jobsRouter.post('/jobs', createJobLimiter, requireStoreOwner, async (req, res, n
     };
     await jobsColl(req.store.id).doc(jobId).set(job);
 
-    // Enqueue to Cloud Tasks if configured (tolerant — worker ships later).
+    // Trigger the worker so the job actually RUNS (it is never left parked):
+    //   1) Cloud Tasks queue configured  → enqueue a task (OIDC).
+    //   2) otherwise WORKER_URL set      → direct self-invoke with the shared
+    //      worker secret, fire-and-forget (the worker endpoint authenticates
+    //      the call; the job runs on another in-flight request and the UI
+    //      polls status).
     if (WORKER_URL && TASKS_QUEUE) {
-      enqueueTask(job).catch((err) =>
-        console.error('[jobs] enqueue failed (non-fatal):', err && err.message ? err.message : err));
+      enqueueTask(job)
+        .catch((err) => {
+          // Queue hiccup → fall back to a direct self-invoke so the job still
+          // runs (the queue's concurrency cap is the funnel when it's up).
+          console.error('[jobs] enqueue failed (non-fatal, falling back):', err && err.message ? err.message : err);
+          return invokeWorkerDirect(job);
+        })
+        .catch((err) =>
+          console.error('[jobs] worker invoke failed (non-fatal):', err && err.message ? err.message : err));
+    } else if (WORKER_URL) {
+      invokeWorkerDirect(job).catch((err) =>
+        console.error('[jobs] worker invoke failed (non-fatal):', err && err.message ? err.message : err));
     }
 
     res.status(202).json({ ok: true, data: { job, wallet } });
@@ -116,7 +135,7 @@ jobsRouter.post('/jobs', createJobLimiter, requireStoreOwner, async (req, res, n
 });
 
 // GET /jobs/:jobId — poll status.
-jobsRouter.get('/jobs/:jobId', requireStoreOwner, async (req, res, next) => {
+jobsRouter.get('/jobs/:jobId', requireOwnStore, async (req, res, next) => {
   try {
     const jobId = cleanId(req.params.jobId);
     const doc = await jobsColl(req.store.id).doc(jobId).get();
@@ -126,12 +145,30 @@ jobsRouter.get('/jobs/:jobId', requireStoreOwner, async (req, res, next) => {
 });
 
 // GET /jobs — own jobs (newest first).
-jobsRouter.get('/jobs', requireStoreOwner, async (req, res, next) => {
+jobsRouter.get('/jobs', requireOwnStore, async (req, res, next) => {
   try {
     const max = Math.min(Math.max(1, parseInt(req.query.limit, 10) || 100), 300);
     const snap2 = await jobsColl(req.store.id).orderBy('createdAt', 'desc').limit(max).get();
     res.json({ ok: true, data: { jobs: snap2.docs.map(snap) } });
   } catch (err) { next(err); }
+});
+
+// GET /ai/status — engine state for the UI (which model will render, and
+// whether the proprietary pipeline is online). Auth-gated; no secrets.
+jobsRouter.get('/ai/status', requireOwnStore, (_req, res) => {
+  const canVertex = vertexConfigured();
+  res.json({
+    ok: true,
+    data: {
+      engine: canVertex ? 'vertex' : 'none',
+      proprietaryOnline: false,
+      fallbackActive: false,
+      workerActive: !!WORKER_URL,
+      imageModel: canVertex ? VERTEX_AI_MODEL : null,
+      textModel: textAiConfigured() ? VERTEX_TEXT_MODEL : null,
+      textAiEnabled: textAiConfigured(),
+    },
+  });
 });
 
 /* ── worker stub (Cloud Tasks) — mounted OUTSIDE the auth gate ──────────
@@ -141,18 +178,40 @@ jobsRouter.get('/jobs', requireStoreOwner, async (req, res, next) => {
 
 export const workerRouter = Router();
 
-// POST /run-job — called by Cloud Tasks (OIDC token) or the API (shared
-// secret). Runs the REAL AI pipeline when a GPU box is configured; otherwise
-// behaves as a stub (credits stay reserved, job stays queued).
+// OIDC token verifier for Cloud Tasks calls. The token is Google-signed and
+// MUST be verified against Google's certs with the WORKER_URL as audience —
+// we never trust a header alone (a spoofed x-cloudtasks-taskname + any token
+// was previously accepted; that's an auth bypass).
+const oidcClient = new OAuth2Client();
+let oidcVerification = null; // memoised per token (tokens are short-lived)
+async function verifyOidcToken(token) {
+  if (!token) return false;
+  // Don't re-verify the same token string in a burst.
+  if (oidcVerification && oidcVerification.token === token) return oidcVerification.ok;
+  let ok = false;
+  try {
+    const ticket = await oidcClient.verifyIdToken({
+      idToken: token,
+      audience: WORKER_URL, // Cloud Tasks sets audience = the target URL
+    });
+    ok = !!ticket.getPayload();
+  } catch { ok = false; }
+  oidcVerification = { token, ok };
+  return ok;
+}
+
+// POST /run-job — called by Cloud Tasks (verified OIDC token) or the API
+// (shared secret). Runs the Vertex AI engine when VERTEX_AI_LOCATION is set;
+// otherwise reverts to 'queued' (credits stay reserved, job stays queued).
 workerRouter.post('/run-job', async (req, res, next) => {
   try {
-    const isTask = !!req.headers['x-cloudtasks-taskname'];
     const bearer = req.headers.authorization || '';
     const token = bearer.startsWith('Bearer ') ? bearer.slice(7) : '';
 
-    const oidcOk = isTask && token.length > 0; // Cloud Tasks OIDC token (audience = WORKER_URL)
+    // TWO valid paths: a cryptographically verified Cloud Tasks OIDC token
+    // (audience = WORKER_URL) OR the shared worker secret. Nothing else.
     const secretOk = WORKER_AUTH_TOKEN && token === WORKER_AUTH_TOKEN;
-    if (!oidcOk && !secretOk) throw forbidden('Workers only.');
+    if (!secretOk && !(await verifyOidcToken(token))) throw forbidden('Workers only.');
 
     // Worker-supplied ids build Firestore references — validate them the same
     // way as any other input (a hostile/compromised caller must not be able to
@@ -194,16 +253,11 @@ workerRouter.post('/run-job', async (req, res, next) => {
       return res.json({ ok: true, data: { status: 'failed', errorCode: 'TIMEOUT' } });
     }
 
-    // ── Engine selection ───────────────────────────────────────────────
-    //    AI_ENGINE: 'auto' (GPU first → Vertex fallback) | 'gpu' | 'vertex'.
-    //    With NO engine configured the worker stays an honest stub (credits
-    //    stay reserved, job stays queued).
-    const canGpu = !!(GPU_HOST_URL && GPU_AUTH_TOKEN);
+    // ── Engine: Vertex AI (Nano Banana 2 Lite) ────────────────────────
     const canVertex = vertexConfigured();
-    const enginePref = AI_ENGINE || 'auto';
-    if (!canGpu && !canVertex) {
+    if (!canVertex) {
       await jobRef.update({ status: 'queued', updatedAt: now() });
-      return res.json({ ok: true, data: { status: 'queued', note: 'worker stub — no AI engine configured yet' } });
+      return res.json({ ok: true, data: { status: 'queued', note: 'Vertex AI not configured yet' } });
     }
 
     const productDoc = await productsColl(storeId).doc(job.productId).get();
@@ -213,59 +267,39 @@ workerRouter.post('/run-job', async (req, res, next) => {
       return res.json({ ok: true, data: { status: 'failed', errorCode: 'PRODUCT_MISSING' } });
     }
 
-    const product = productDoc.data();
-    let engine = null;
+    let product = productDoc.data();
     let submitted = null;
 
-    if (enginePref === 'vertex' && canVertex) {
-      engine = 'vertex';
-    } else if (canGpu) {
+    // ── Pass 1: listing text (Gemini, best-effort) — the SEO copy the
+    //    seller sees (title, description, sizes, colours, material, price
+    //    suggestion). Improves the image prompt too (the generated title
+    //    replaces the placeholder). NEVER fails the job: images can still
+    //    render even if the text pass breaks.
+    if (textAiConfigured()) {
       try {
-        submitted = await submitGpuJob({ job, product });
-        engine = 'gpu';
-      } catch (err) {
-        if (canVertex && enginePref !== 'gpu') {
-          // Box unreachable/rejected → try the managed fallback before giving up.
-          console.error('[jobs] GPU submit failed, falling back to Vertex AI:', err.code || err.message);
-          engine = 'vertex';
-        } else {
-          // Release the claim so Cloud Tasks can retry (backoff). Do NOT
-          // refund yet — the job may still succeed on retry.
-          await jobRef.update({ status: 'queued', errorCode: err.code || 'GPU_SUBMIT_FAILED', updatedAt: now() });
-          throw err;
+        const listing = await generateListingText(product);
+        if (listing) {
+          const patch = { aiSpecs: listing.aiSpecs, updatedAt: now() };
+          const titleIsPlaceholder = !product.title
+            || product.title === 'Product photo'
+            || /^untitled/i.test(product.title);
+          if (listing.title && titleIsPlaceholder) patch.title = listing.title;
+          await productsColl(storeId).doc(job.productId).update(patch);
+          product = { ...product, ...patch };
         }
-      }
-    } else if (canVertex) {
-      engine = 'vertex';
-    }
-
-    if (engine === 'vertex') {
-      try {
-        submitted = await generateWithVertexAi({ job, product });
       } catch (err) {
-        // Managed API failed → definitive: fail the job and REFUND (idempotent
-        // key, safe — a retry can never double-refund).
-        await jobRef.update({ status: 'failed', errorCode: err.code || 'VERTEX_FAILED', updatedAt: now() });
-        await refundCredits({ storeId, amount: job.creditsReserved, idemKey: `refund:${jobId}`, note: `Job ${jobId}: ${err.message || 'Vertex AI failure'}` });
-        return res.json({ ok: true, data: { status: 'failed', errorCode: err.code || 'VERTEX_FAILED' } });
+        console.error('[jobs] text pass failed (non-fatal):', err.code || err.message);
       }
     }
 
-    if (engine === 'gpu') {
-      let result;
-      try {
-        result = await pollGpuJob(submitted.jobId);
-      } catch (err) {
-        // Definitive timeout → fail the job and REFUND (idempotent key, safe).
-        await jobRef.update({ status: 'failed', errorCode: 'GPU_TIMEOUT', updatedAt: now() });
-        await refundCredits({ storeId, amount: job.creditsReserved, idemKey: `refund:${jobId}`, note: `Job ${jobId}: GPU timeout` });
-        return res.json({ ok: true, data: { status: 'failed', errorCode: 'GPU_TIMEOUT' } });
-      }
-      if (result.status === 'failed') {
-        await jobRef.update({ status: 'failed', errorCode: result.error || 'GPU_JOB_FAILED', updatedAt: now() });
-        await refundCredits({ storeId, amount: job.creditsReserved, idemKey: `refund:${jobId}`, note: `Job ${jobId}: ${result.error || 'worker failure'}` });
-        return res.json({ ok: true, data: { status: 'failed' } });
-      }
+    try {
+      submitted = await generateWithVertexAi({ job, product });
+    } catch (err) {
+      // Managed API failed → definitive: fail the job and REFUND (idempotent
+      // key, safe — a retry can never double-refund).
+      await jobRef.update({ status: 'failed', errorCode: err.code || 'VERTEX_FAILED', updatedAt: now() });
+      await refundCredits({ storeId, amount: job.creditsReserved, idemKey: `refund:${jobId}`, note: `Job ${jobId}: ${err.message || 'Vertex AI failure'}` });
+      return res.json({ ok: true, data: { status: 'failed', errorCode: err.code || 'VERTEX_FAILED' } });
     }
 
     // Success — persist the output gallery onto the product FIRST, then mark
@@ -287,6 +321,32 @@ workerRouter.post('/run-job', async (req, res, next) => {
     res.json({ ok: true, data: { status: 'done', outputPaths } });
   } catch (err) { next(err); }
 });
+
+/* ── Direct self-invoke helper (no Cloud Tasks queue needed) ───────────
+   POSTs the job to our own worker endpoint with the shared secret. Called
+   fire-and-forget from POST /jobs; the worker endpoint runs the real
+   pipeline on a separate in-flight request (Cloud Run keeps the instance
+   alive for it) and the UI polls GET /jobs/{id} for progress.          */
+
+async function invokeWorkerDirect(job) {
+  if (!WORKER_AUTH_TOKEN) {
+    console.warn('[jobs] WORKER_URL set but WORKER_AUTH_TOKEN missing — job left queued.');
+    return;
+  }
+  const res = await fetch(`${WORKER_URL}/workers/run-job`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${WORKER_AUTH_TOKEN}`,
+    },
+    body: JSON.stringify({ jobId: job.id, storeId: job.storeId }),
+    signal: AbortSignal.timeout(600_000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    console.error('[jobs] worker self-invoke failed:', res.status, text.slice(0, 200));
+  }
+}
 
 /* ── Cloud Tasks helper ───────────────────────────────────────────────── */
 
