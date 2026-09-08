@@ -2,18 +2,21 @@
    KatalogitAI — live cataloging sessions (QR multi-device join)
    ────────────────────────────────────────────────────────────────────────
    A store owner starts a session from Add Product → Multiple Products. The
-   session mints JOIN tokens — each one powers ONE QR code, is usable ONCE
-   (a second scan is rejected), and expires after 15 minutes. A scanning
-   phone exchanges its single-use join token for a per-DEVICE token (valid
-   for the session), then uploads captured photos against that token.
+   session mints a JOIN token that powers ONE QR code for ALL phones — every
+   phone scans the same code to join (a small store can hand one printed QR
+   to 8 shooters), it expires after 15 minutes, and a fresh one can be
+   minted if needed. Each joining phone exchanges the join token for its own
+   per-DEVICE token (valid for the session), then uploads captured photos
+   against that token.
 
    Security:
      • Tokens are minted as 64-hex random bytes and stored ONLY as sha256
        hashes — a Firestore leak exposes no usable join/device token.
      • Token comparison uses timingSafeEqual.
      • Join is public by design (scanning phones have no account) but
-       per-IP rate limited; the single-use exchange is ATOMIC (a race can
-       never join twice with one QR).
+       per-IP rate limited (300 joins/hr) — a leaked QR lets outsiders join
+       and stage photos, but nothing lands in the store until the OWNER
+       pulls the session, and the owner reviews before any AI runs.
      • Photos stream to GCS via signed URLs (metadata-only to the API) — a
        10MB capture can never exceed Firestore's 1MB document limit. Bytes
        are rate-limited per device; there are NO device/photo hard caps (a
@@ -25,7 +28,7 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { db, sessionsColl, sessionPhotosColl, storeRef, now, snap } from '../db.js';
+import { db, sessionsColl, sessionPhotosColl, storeRef, now } from '../db.js';
 import {
   sessionCreate, sessionJoin, sessionPhotoUpload, sessionPhotoConfirm, id as cleanId,
 } from '../validate.js';
@@ -47,8 +50,6 @@ const JOIN_TTL_MS = 15 * 60 * 1000;       // one QR = 15 minutes to scan
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000; // auto-expires after 6h (long shoots)
 const MAX_PHOTOS_FETCH = 2000;             // safety for one owner fetch, not a cap
 const MAX_ACTIVITY = 100;
-const MAX_PHOTO_BYTES = 10 * 1024 * 1024;  // 10MB per capture (complex fabrics)
-
 // Two surfaces:
 //   • sessionsRouter      — owner routes, mounted INSIDE the auth gate.
 //   • sessionsPublicRouter — join + photo (joined phones have no account),
@@ -161,9 +162,8 @@ sessionsRouter.post('/sessions', createLimiter, requireOwnStore, async (req, res
       status: 'active',
       createdAt: now(),
       updatedAt: now(),
-      joinTokenHash: hashToken(joinToken), // single-use — usable once
+      joinTokenHash: hashToken(joinToken), // multi-use — every phone scans the SAME QR
       joinExpiresAt: now() + JOIN_TTL_MS,
-      joinUsedAt: null,
       devices: [],
       activity: [{ ts: now(), type: 'session_started', deviceName: 'Owner', detail: 'Session created' }],
       photoCount: 0,
@@ -180,21 +180,22 @@ sessionsRouter.post('/sessions', createLimiter, requireOwnStore, async (req, res
   } catch (err) { next(err); }
 });
 
-// POST /sessions/:id/join — PUBLIC, single-use QR token → device token.
+// POST /sessions/:id/join — PUBLIC, multi-use QR token → per-device token.
 sessionsPublicRouter.post('/sessions/:sessionId/join', joinLimiter, loadSession, async (req, res, next) => {
   try {
-    const { token, deviceName } = sessionJoin(req.body || {});
+    const { deviceName } = sessionJoin(req.body || {});
     const s = req.session;
     if (s.status !== 'active') throw badRequest('SESSION_CLOSED', 'This session is no longer active.');
     if (now() > (s.joinExpiresAt || 0)) throw badRequest('JOIN_EXPIRED', 'This link has expired. Ask the store for a fresh QR code.');
-    if (s.joinUsedAt) throw badRequest('JOIN_USED', 'This link was already used. Ask the store for a fresh QR code.');
 
-    // Atomic single-use exchange: only ONE device can ever redeem a token.
+    // The SAME QR joins every phone until it expires (15 min) or the session
+    // closes — one code for the whole shoot, no per-device QRs. The token is
+    // only verified; it is never consumed. Each phone gets its own DEVICE
+    // token so uploads stay individually rate-limited and attributable.
     let out;
     await db.runTransaction(async (tx) => {
       const ref = sessionsColl().doc(s.id);
       const cur = (await tx.get(ref)).data();
-      if (cur.joinUsedAt) { out = { duplicate: true }; return; }
       if (cur.status !== 'active') throw badRequest('SESSION_CLOSED', 'This session is no longer active.');
       if (now() > (cur.joinExpiresAt || 0)) throw badRequest('JOIN_EXPIRED', 'This link has expired.');
       const deviceToken = mintToken();
@@ -205,16 +206,12 @@ sessionsPublicRouter.post('/sessions/:sessionId/join', joinLimiter, loadSession,
         joinedAt: now(),
       };
       tx.update(ref, {
-        joinUsedAt: now(),
-        joinTokenHash: null,
         devices: [...(cur.devices || []), device],
         activity: [...(cur.activity || []).slice(-MAX_ACTIVITY), { ts: now(), type: 'device_joined', deviceName, detail: 'Phone joined' }],
         updatedAt: now(),
       });
       out = { device, deviceToken };
     });
-
-    if (out.duplicate) throw badRequest('JOIN_USED', 'This link was already used. Ask the store for a fresh QR code.');
 
     // Store display name comes from the session owner's store doc.
     const storeDoc = await storeRef(s.storeId).get().catch(() => null);
@@ -328,7 +325,9 @@ sessionsRouter.get('/sessions', requireOwnStore, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /sessions/:id/join-url — owner mints a FRESH single-use QR token.
+// POST /sessions/:id/join-url — owner mints a FRESH multi-use QR token
+// (the previous one keeps working for already-joined phones; new phones get
+// the new code once the old one expires).
 sessionsRouter.post('/sessions/:sessionId/join-url', userLimiter({ windowMs: 60 * 60 * 1000, limit: 60 }), loadSession, requireSessionOwner, async (req, res, next) => {
   try {
     if (req.session.status !== 'active') throw badRequest('SESSION_CLOSED', 'Session is not active.');
@@ -336,7 +335,6 @@ sessionsRouter.post('/sessions/:sessionId/join-url', userLimiter({ windowMs: 60 
     await sessionsColl().doc(req.session.id).update({
       joinTokenHash: hashToken(joinToken),
       joinExpiresAt: now() + JOIN_TTL_MS,
-      joinUsedAt: null,
       updatedAt: now(),
     });
     res.json({

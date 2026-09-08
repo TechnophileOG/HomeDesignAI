@@ -84,7 +84,7 @@ const ok = (name) => { passed += 1; console.log(`  ✓ ${name}`); };
 {
   const out = sanitizeStore({ ...base(), name: 'Store<script>alert(1)</script>', city: 'Delhi\u0000 City' });
   assert.ok(!/</.test(out.name));
-  assert.ok(!/\u0000/.test(out.city));
+  assert.ok(!/\u0000/.test(out.city)); // eslint-disable-line no-control-regex
   ok('control chars + markup stripped from store fields');
 }
 

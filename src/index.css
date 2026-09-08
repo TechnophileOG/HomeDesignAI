@@ -441,7 +441,8 @@ body {
 .carousel-wrapper {
   position: relative;
   width: 100%;
-  height: 190px;
+  /* Full-height banner — 190px felt shrunk on desktop; scale with the screen. */
+  height: clamp(150px, 30vw, 320px);
   border-radius: var(--radius-lg);
   overflow: hidden;
   border: 1px solid var(--glass-border);
@@ -5931,19 +5932,22 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px;
+  padding: 16px;
   background:
     radial-gradient(1200px 600px at 85% -10%, rgba(22,122,82,.12), transparent 60%),
     radial-gradient(900px 500px at -10% 110%, rgba(244,214,183,.55), transparent 60%),
     var(--c-cream, #fdf6ee);
   font-family: var(--font-geom);
 }
+/* The card is COMPACT by design — everything (fields, errors, buttons) must
+   fit the viewport without scrolling, so users never miss an error message
+   below the fold. No overflow: everything is sized to fit ~560px of height. */
 .ag-card {
-  width: min(400px, 100%);
+  width: min(380px, 100%);
   background: var(--glass-bg);
   border: 1px solid var(--glass-border);
-  border-radius: 24px;
-  padding: 30px 28px 24px;
+  border-radius: 22px;
+  padding: 20px 22px 16px;
   box-shadow: var(--glass-shadow);
   animation: ag-pop .35s cubic-bezier(.34,1.4,.64,1);
 }
@@ -5951,21 +5955,21 @@ body {
   from { transform: translateY(14px) scale(.98); opacity: 0; }
   to   { transform: translateY(0) scale(1); opacity: 1; }
 }
-.ag-brand { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 18px; }
+.ag-brand { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 12px; }
 .ag-brand .kat-logo-mark {
-  width: 34px;
+  width: 32px;
 }
 .ag-brand .kat-logo-word {
-  font-size: 1.2rem;
+  font-size: 1.1rem;
 }
 .ag-brand .kat-logo-pill {
-  font-size: .72rem;
+  font-size: .7rem;
 }
-.ag-title { font-size: 1.35rem; font-weight: 800; color: var(--c-peach-darker); margin: 0 0 4px; }
-.ag-sub { font-size: .8rem; color: var(--c-peach-dark); opacity: .75; margin: 0 0 18px; line-height: 1.5; }
-.ag-tabs { display: flex; gap: 6px; background: rgba(139,90,43,.08); padding: 4px; border-radius: 12px; margin-bottom: 18px; }
+.ag-title { font-size: 1.2rem; font-weight: 800; color: var(--c-peach-darker); margin: 0 0 2px; }
+.ag-sub { font-size: .76rem; color: var(--c-peach-dark); opacity: .75; margin: 0 0 12px; line-height: 1.45; }
+.ag-tabs { display: flex; gap: 6px; background: rgba(139,90,43,.08); padding: 3px; border-radius: 11px; margin-bottom: 12px; }
 .ag-tab {
-  flex: 1; padding: 9px 0;
+  flex: 1; padding: 8px 0;
   border: none; border-radius: 9px;
   background: transparent;
   font-weight: 700; font-size: .78rem;
@@ -5975,14 +5979,14 @@ body {
   font-family: var(--font-geom);
 }
 .ag-tab.active { background: #fff; color: var(--c-accent-dark); box-shadow: 0 2px 8px rgba(36,33,29,.1); }
-.ag-form { display: flex; flex-direction: column; gap: 12px; }
-.ag-field { display: flex; flex-direction: column; gap: 5px; }
-.ag-label { font-size: .7rem; font-weight: 800; color: var(--c-peach-darker); }
+.ag-form { display: flex; flex-direction: column; gap: 9px; }
+.ag-field { display: flex; flex-direction: column; gap: 4px; }
+.ag-label { font-size: .68rem; font-weight: 800; color: var(--c-peach-darker); }
 .ag-input {
-  padding: 11px 13px;
+  padding: 10px 12px;
   border: 1.5px solid var(--glass-border);
   border-radius: 11px;
-  font-size: .88rem;
+  font-size: .85rem;
   background: #fff;
   color: var(--c-peach-darker);
   font-family: var(--font-sans);   /* explicit — typed text must always render */
@@ -5990,24 +5994,24 @@ body {
   transition: border-color .15s, box-shadow .15s;
 }
 .ag-input:focus { outline: none; border-color: var(--c-accent); box-shadow: 0 0 0 3px rgba(22,122,82,.12); }
-.ag-hint { display: flex; align-items: center; gap: 5px; font-size: .68rem; color: var(--c-accent-dark); opacity: .85; margin: 0; }
+.ag-hint { display: flex; align-items: center; gap: 5px; font-size: .64rem; color: var(--c-accent-dark); opacity: .85; margin: 0; }
 .ag-error {
   display: flex; align-items: flex-start; gap: 6px;
-  padding: 9px 11px;
+  padding: 8px 10px;
   border-radius: 10px;
   background: #fde8e8;
   border: 1px solid rgba(192,57,43,.3);
   color: #c0392b;
-  font-size: .75rem; font-weight: 600;
+  font-size: .72rem; font-weight: 600;
   line-height: 1.4;
 }
 .ag-submit {
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 12px;
+  padding: 11px;
   border: none; border-radius: 12px;
   background: linear-gradient(135deg, var(--c-accent), var(--c-accent-dark));
   color: #fff;
-  font-size: .9rem; font-weight: 800;
+  font-size: .88rem; font-weight: 800;
   cursor: pointer;
   font-family: var(--font-geom);
   transition: transform .15s, box-shadow .15s;
@@ -6017,9 +6021,9 @@ body {
 .ag-submit:disabled { opacity: .6; cursor: not-allowed; }
 .ag-divider {
   display: flex; align-items: center; gap: 10px;
-  margin: 14px 0 10px;
+  margin: 10px 0 8px;
   color: var(--c-peach-dark); opacity: .7;
-  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+  font-size: .66rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
 }
 .ag-divider::before, .ag-divider::after {
   content: ''; flex: 1; height: 1px; background: rgba(0,0,0,.08);
@@ -6027,7 +6031,7 @@ body {
 .ag-google {
   display: flex; align-items: center; justify-content: center; gap: 9px;
   width: 100%;
-  padding: 11px;
+  padding: 10px;
   border-radius: 12px;
   background: #fff;
   border: 1px solid rgba(0,0,0,.14);
@@ -6041,25 +6045,25 @@ body {
 .ag-google:disabled { opacity: .6; cursor: not-allowed; }
 .ag-verify-icon {
   display: flex; align-items: center; justify-content: center;
-  width: 52px; height: 52px; margin: 0 auto 10px;
+  width: 44px; height: 44px; margin: 0 auto 8px;
   border-radius: 50%;
   background: linear-gradient(135deg, rgba(255,107,53,.15), rgba(22,122,82,.15));
   color: var(--c-accent-dark);
 }
 .ag-info {
-  padding: 9px 11px;
+  padding: 8px 10px;
   border-radius: 10px;
   background: #eefaf3;
   border: 1px solid rgba(22,122,82,.25);
   color: var(--c-accent-dark);
-  font-size: .75rem; font-weight: 600;
+  font-size: .72rem; font-weight: 600;
   line-height: 1.4;
 }
 .ag-ghost {
   display: flex; align-items: center; justify-content: center; gap: 6px;
   width: 100%;
-  padding: 11px;
-  margin-top: 8px;
+  padding: 10px;
+  margin-top: 6px;
   border-radius: 12px;
   border: 1px solid rgba(0,0,0,.12);
   background: #fff;
@@ -6073,7 +6077,7 @@ body {
 .ag-ghost:disabled { opacity: .6; cursor: not-allowed; }
 .ag-link {
   display: block;
-  margin: 12px auto 0;
+  margin: 10px auto 0;
   background: none; border: none; padding: 0;
   color: var(--c-accent-dark);
   font-size: .78rem; font-weight: 700;

@@ -23,16 +23,27 @@ import fs from 'node:fs'
 //    calls a geocoder directly, so no geocoder domain is in connect-src.
 //  - frame-ancestors 'none' → clickjacking protection (header-only: enforced via
 //    vite preview headers, public/_headers and vercel.json, NOT via this meta).
+//  - https://apis.google.com + https://accounts.google.com → Firebase Auth
+//    Google sign-in. The popup opens accounts.google.com; the auth iframe on
+//    OUR origin loads https://apis.google.com/js/api.js. Without these, the
+//    CSP blocks the bridge script and Google sign-in fails with a generic
+//    "Sign-in failed" (the exact bug this list fixes).
+//  - https://katalogitai-501916.firebaseapp.com / .web.app → the Firebase
+//    authDomain. Both the popup handoff and REDIRECT sign-in load a hidden
+//    iframe there to complete the OAuth exchange; blocking it makes the
+//    sign-in hang after the user picks their Google account.
 const API_AND_FIREBASE = 'https://*.run.app https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://storage.googleapis.com https://checkout.razorpay.com';
+const GOOGLE_AUTH = 'https://apis.google.com https://accounts.google.com';
+const FIREBASE_AUTH_DOMAIN = 'https://katalogitai-501916.firebaseapp.com https://katalogitai-501916.web.app';
 const APP_CSP = [
   "default-src 'self'",
-  `script-src 'self' https://checkout.razorpay.com`,
+  `script-src 'self' https://checkout.razorpay.com https://apis.google.com`,
   `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://checkout.razorpay.com`,
   "font-src 'self' https://fonts.gstatic.com data:",
-  `img-src 'self' data: blob: https://storage.googleapis.com`,
+  `img-src 'self' data: blob: https://storage.googleapis.com https://www.gstatic.com https://ssl.gstatic.com`,
   "media-src 'self' blob:",
-  `connect-src 'self' ${API_AND_FIREBASE} wss: ws:`,
-  `frame-src https://checkout.razorpay.com https://www.google.com`,
+  `connect-src 'self' ${API_AND_FIREBASE} ${GOOGLE_AUTH} wss: ws:`,
+  `frame-src https://checkout.razorpay.com https://www.google.com ${GOOGLE_AUTH} ${FIREBASE_AUTH_DOMAIN}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -43,12 +54,12 @@ const APP_CSP = [
 // Font Awesome from cdnjs — a different, tighter-but-sufficient policy.
 const LANDING_CSP = [
   "default-src 'self'",
-  "script-src 'self' https://www.gstatic.com",
+  `script-src 'self' https://www.gstatic.com https://apis.google.com`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com",
   "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com data:",
-  "img-src 'self' data: blob:",
-  `connect-src 'self' ${API_AND_FIREBASE}`,
-  "frame-src 'none'",
+  `img-src 'self' data: blob: https://www.gstatic.com https://ssl.gstatic.com`,
+  `connect-src 'self' ${API_AND_FIREBASE} ${GOOGLE_AUTH}`,
+  `frame-src https://accounts.google.com https://apis.google.com ${FIREBASE_AUTH_DOMAIN}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -149,7 +160,8 @@ export default defineConfig({
     headers: {
       ...SHARED_SECURITY_HEADERS,
       // Dev HMR needs the WebSocket; keep script-src relaxed for React-Refresh.
-      'Content-Security-Policy': `default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://checkout.razorpay.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://storage.googleapis.com; media-src 'self' blob:; connect-src 'self' ws: wss: ${API_AND_FIREBASE}; frame-src https://checkout.razorpay.com https://www.google.com; object-src 'none'; base-uri 'self'; form-action 'self'`,
+      // Google OAuth domains included so Google sign-in works in dev too.
+      'Content-Security-Policy': `default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com https://apis.google.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://checkout.razorpay.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://storage.googleapis.com https://www.gstatic.com https://ssl.gstatic.com; media-src 'self' blob:; connect-src 'self' ws: wss: ${API_AND_FIREBASE} ${GOOGLE_AUTH}; frame-src https://checkout.razorpay.com https://www.google.com ${GOOGLE_AUTH} ${FIREBASE_AUTH_DOMAIN}; object-src 'none'; base-uri 'self'; form-action 'self'`,
     },
   },
   preview: {

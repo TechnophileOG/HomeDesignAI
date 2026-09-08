@@ -21,7 +21,7 @@ import { tooMany, notFound } from '../errors.js';
 import { requireAdmin } from '../auth.js';
 import { auditWrite } from '../audit.js';
 import { FIREBASE_WEB_API_KEY, RESET_CONTINUE_URL } from '../config.js';
-import { sendPasswordResetBranded } from '../email.js';
+import { sendPasswordResetBranded, safeContinueUrl } from '../email.js';
 
 const leadLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
@@ -90,6 +90,9 @@ publicRouter.post('/auth/reset-email', resetIpLimiter, resetEmailLimiter, async 
   try {
     const body = req.body || {};
     const targetEmail = cleanEmail(body.email);
+    // Client may pass its own origin so the reset link returns to the exact
+    // app instance — validated against APP_URL/CORS origins, never attacker-set.
+    const continueUrl = safeContinueUrl(body.continueUrl);
 
     if (!FIREBASE_WEB_API_KEY) {
       auditWrite({ kind: 'auth_reset_misconfig', method: 'POST', path: '/api/v1/public/auth/reset-email', status: 501, uid: '', ip: maskIp(req.ip) });
@@ -99,9 +102,10 @@ publicRouter.post('/auth/reset-email', resetIpLimiter, resetEmailLimiter, async 
     // 1) Preferred: our branded email (Resend). 2) Fallback: Firebase's own
     // email service (Identity Toolkit). Always reply success generically —
     // the caller must never learn whether the address has an account.
-    const branded = await sendPasswordResetBranded(targetEmail);
+    const branded = await sendPasswordResetBranded(targetEmail, targetEmail, continueUrl);
     if (!branded) {
       try {
+        const cu = continueUrl || RESET_CONTINUE_URL;
         const resp = await fetch(
           `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(FIREBASE_WEB_API_KEY)}`,
           {
@@ -110,7 +114,7 @@ publicRouter.post('/auth/reset-email', resetIpLimiter, resetEmailLimiter, async 
             body: JSON.stringify({
               requestType: 'PASSWORD_RESET',
               email: targetEmail,
-              ...(RESET_CONTINUE_URL ? { continueUrl: RESET_CONTINUE_URL } : {}),
+              ...(cu ? { continueUrl: cu } : {}),
             }),
             signal: AbortSignal.timeout(15000),
           },

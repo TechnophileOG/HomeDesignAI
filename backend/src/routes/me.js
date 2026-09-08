@@ -15,7 +15,7 @@ import { db, now } from '../db.js';
 import { userLimiter } from '../rate-limit.js';
 import { auditWrite } from '../audit.js';
 import { badRequest } from '../errors.js';
-import { sendVerificationBranded } from '../email.js';
+import { sendVerificationBranded, safeContinueUrl } from '../email.js';
 import { FIREBASE_WEB_API_KEY } from '../config.js';
 
 const meRouter = Router();
@@ -39,10 +39,13 @@ meRouter.post('/me/send-verification', verifyLimiter, async (req, res, next) => 
     const idToken = idTokenFrom(req);
     if (!idToken) throw badRequest('INVALID_TOKEN', 'Missing authentication token.');
     const email = String(req.user?.email || '').toLowerCase();
+    // Client may pass its own origin so the verify link returns to the exact
+    // app instance — validated against APP_URL/CORS origins, never attacker-set.
+    const continueUrl = safeContinueUrl((req.body || {}).continueUrl);
 
     // Preferred: branded email via our provider. Fallback: Firebase's own
     // verification email (Identity Toolkit with the user's ID token).
-    const branded = await sendVerificationBranded(email, idToken);
+    const branded = await sendVerificationBranded(email, idToken, continueUrl);
     if (!branded && FIREBASE_WEB_API_KEY) {
       try {
         const resp = await fetch(
@@ -50,7 +53,7 @@ meRouter.post('/me/send-verification', verifyLimiter, async (req, res, next) => 
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requestType: 'VERIFY_EMAIL', idToken }),
+            body: JSON.stringify({ requestType: 'VERIFY_EMAIL', idToken, ...(continueUrl ? { continueUrl } : {}) }),
             signal: AbortSignal.timeout(15000),
           },
         );

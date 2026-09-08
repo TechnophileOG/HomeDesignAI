@@ -32,7 +32,7 @@ const rel = (cpm, name) => cpm?.cosmoRelations?.find((r) => r.relation === name)
 const dedupe = (arr) => [...new Set(arr.filter(Boolean))];
 
 /** Strip control chars + collapse whitespace (no raw newlines in titles). */
-const sanitize = (str) => String(str || '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+const sanitize = (str) => String(str || '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim(); // eslint-disable-line no-control-regex
 
 /** Word-safe hard cap: keep the front, drop trailing words, never split one. */
 const enforceMax = (str, max) => {

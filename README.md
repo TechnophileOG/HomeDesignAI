@@ -1,16 +1,19 @@
-# React + Vite
+# HomeDesign AI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+AI-powered home design for everyone. Drop your plot location or your architect's map, and an open-source AI model generates different 3D models of your home — viewable right in the browser.
 
-Currently, two official plugins are available:
+## The Idea
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- **Drop & design** — Share your plot location or upload a floor plan. The AI creates multiple home design variations.
+- **Seamless 3D** — Built on a lightweight, web-based 3D rendering engine connected via MCP, so it works the same on web or mobile app.
+- **Natural navigation** — The house's outer structure sits in the top-right; select a floor or room and it moves to center. Simple enough for anyone to use.
+- **Design panel** — A side panel shows design options, wall art, interiors, and more for the space you're viewing.
 
-## React Compiler
+## Where This Goes
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Nobody can replace the real experience of a home — but we can get people remarkably close before they ever visit. Monetization is designed to be self-sustaining:
 
-## Expanding the Oxlint configuration
+- **Interior & furniture affiliates** — Partner with brands (e.g. Godrej Interio and similar) and earn commission when users order items they've placed in their design.
+- **Realtor/property dealer affiliates** — Builders and dealers use the tool to showcase properties; buyers arrive pre-sold.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+The goal: the product funds itself online, while community effort drives adoption on the ground.

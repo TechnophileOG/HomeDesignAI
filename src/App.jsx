@@ -62,6 +62,11 @@ export default function App() {
   // Auth gate — the app stays closed until a valid session exists
   const [authed, setAuthed]       = useState(false);
   const [authChecked, setAuthChecked] = useState(false);
+  // Hydration gate — set true only after api.bootstrap() has landed. Stops the
+  // onboarding flash: the preloader's hard cap (4.3s) can outrun the bootstrap
+  // fetch, and rendering OnboardingFlow before the server says "onboarded"
+  // showed the onboarding screen for a frame on every sign-in.
+  const [hydrated, setHydrated]   = useState(false);
   const [session, setSession]     = useState(null); // carries isAdmin for role gating
   // re-entry guard: stops a double-tap on a draft's Generate from double-spending
   const generateBusyRef           = useRef(false);
@@ -115,6 +120,12 @@ export default function App() {
       try {
         ok = await auth.hasSession();
         s  = ok ? await api.getSession() : null;
+        // User verified in another tab/device: refresh the cached session once
+        // so they're never stuck on the verify gate until the next poll tick.
+        if (ok && s && !s.emailVerified) {
+          const r = await auth.refreshVerified();
+          if (r.ok && r.verified && r.session) s = r.session;
+        }
       } catch (err) {
         console.error('[app] session check failed:', err);
         ok = false; // cannot verify → auth gate (never a stuck spinner)
@@ -133,8 +144,21 @@ export default function App() {
       if (mounted) setFontsReady(true);
     })();
     const q = new URLSearchParams(window.location.search);
-    if (q.get('mode') === 'resetPassword' && q.get('oobCode')) {
-      setResetFlow({ oobCode: q.get('oobCode'), apiKey: q.get('apiKey') || '' });
+    const mode = q.get('mode');
+    const oobCode = q.get('oobCode');
+    if (oobCode) {
+      if (mode === 'resetPassword') {
+        setResetFlow({ oobCode, apiKey: q.get('apiKey') || '' });
+      } else if (mode === 'verifyEmail') {
+        // In-app verification link (the backend-branded email links straight
+        // to /app?mode=verifyEmail&oobCode=…). Consume the code, force-refresh
+        // the token, and clear the URL — the standard hosted-handler flow
+        // rarely lands here, but this closes the loop for every link type.
+        auth.applyVerifyCode(oobCode).then((res) => {
+          if (res.ok && res.verified && res.session) setSession(res.session);
+          window.history.replaceState({}, '', window.location.pathname);
+        }).catch(() => {});
+      }
     }
     return () => { mounted = false; };
   }, []);
@@ -180,6 +204,8 @@ export default function App() {
           if (mounted) { setAuthed(false); setSession(null); }
         }
       }
+      // Server data has landed (or the session died) — safe to reveal.
+      if (mounted) setHydrated(true);
     })();
     return () => { mounted = false; };
   }, [authed]);
@@ -243,11 +269,12 @@ export default function App() {
           ? { path: it.path, contentType: it.mime || 'image/jpeg', size: it.size || 0 }
           : await uploadPhoto(it.front);
         if (opts.hold) {
-          // Held: no job, no credits — the proprietary model generates later.
+          // Held/draft: no job, no credits — photos are safe, the user
+          // generates from the Review Center when ready.
           await api.createProduct({
             title: 'Product photo', category: 'Apparel', status: 'draft',
             flatLay,
-            note: 'Held — awaiting the proprietary Katalogit AI model.',
+            note: opts.note || 'Held — awaiting the proprietary Katalogit AI model.',
           });
           anyDraft = true;
         } else {
@@ -604,7 +631,7 @@ export default function App() {
   }
   if (!authed) {
     return (
-      <AuthGate onAuthed={(s) => { setSession(s || null); setAuthed(true); setShowPreloader(true); }} />
+      <AuthGate onAuthed={(s) => { setSession(s || null); setAuthed(true); setShowPreloader(true); setHydrated(false); }} />
     );
   }
   // Signed in but email not verified (e.g. signed up on the website) → the
@@ -613,7 +640,7 @@ export default function App() {
     return (
       <AuthGate
         initialVerifyEmail={session?.email}
-        onAuthed={(s) => { setSession(s || null); setShowPreloader(true); }}
+        onAuthed={(s) => { setSession(s || null); setShowPreloader(true); setHydrated(false); }}
       />
     );
   }
@@ -626,6 +653,7 @@ export default function App() {
     setSession(null);
     setAuthed(false);
     setShowPreloader(false);
+    setHydrated(false);
     setStoreProfile(null);
     setOnboardingDone(false);
     setProducts([]);
@@ -644,10 +672,17 @@ export default function App() {
   if (showPreloader) {
     return (
       <KatalogitPreloader
-        ready={authChecked && fontsReady}
+        ready={authChecked && fontsReady && hydrated}
         onComplete={() => setShowPreloader(false)}
       />
     );
+  }
+
+  // One-frame hold: if the preloader cap fired before bootstrap landed, stay
+  // on a spinner rather than flashing the onboarding screen (real bug — the
+  // onboarding screen appeared for a split second after every sign-in).
+  if (!hydrated) {
+    return <div className="ag-wrap"><div className="ai-spinner" style={{ margin: '0 auto' }} /></div>;
   }
 
   if (!onboardingDone) {
@@ -806,7 +841,6 @@ export default function App() {
           onShootComplete={handleShootComplete}
           onLowBalanceAlert={handleLowBalanceAlert}
           initialSessionId={resumeSessionId}
-          onSessionClosed={refreshSessions}
         />
       )}
       {selectedPdpProduct && (

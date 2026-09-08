@@ -24,7 +24,7 @@ export const EXPORT_PLATFORMS = ['amazon', 'flipkart', 'meesho', 'myntra', 'alib
     text that lands in these files, so we neutralise the trigger prefix with
     a leading apostrophe — the cell shows the literal text, never executes. */
 const csvCell = (v) => {
-  let s = String(v ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+  let s = String(v ?? '').replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim(); // eslint-disable-line no-control-regex
   if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };

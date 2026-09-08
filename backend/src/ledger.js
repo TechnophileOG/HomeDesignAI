@@ -14,7 +14,6 @@
    the same signatures and nothing else in the API changes.
    ════════════════════════════════════════════════════════════════════════ */
 
-import { FieldValue } from '@google-cloud/firestore';
 import { db, walletRef, ledgerColl, globalLedgerColl, opRef } from './db.js';
 import { insufficientCredits } from './errors.js';
 
@@ -53,7 +52,7 @@ export async function getWallet(storeId) {
     `plan` (optional) upgrades the wallet tier inside the SAME transaction and
     idempotency marker as the credit grant — a paid top-up can atomically flip
     the store to PRO, and a replayed webhook can never apply it twice. */
-export async function grantCredits({ storeId, amount, idemKey, type = 'GRANT', note = '', actor = 'system', plan = null }) {
+export async function grantCredits({ storeId, amount, idemKey, note = '', actor = 'system', plan = null }) {
   if (!(amount > 0)) throw new Error('grant amount must be positive');
   return runIdempotent(idemKey, async (tx) => {
     const ref = walletRef(storeId);

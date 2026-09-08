@@ -39,12 +39,12 @@ function readJSON(key, fallback) {
   try {
     var raw = localStorage.getItem(key);
     return raw ? JSON.parse(raw) : fallback;
-  } catch (e) {
+  } catch {
     return fallback;
   }
 }
 function writeJSON(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* noop */ }
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* noop */ }
 }
 
 function cleanControl(s) {
@@ -158,10 +158,22 @@ async function register(_args) {
 
   try {
     var cred = await fbAuth.createUserWithEmailAndPassword(clean.email, pw);
-    try { await cred.user.updateProfile({ displayName: clean.name }); } catch (e) { /* non-fatal */ }
+    try { await cred.user.updateProfile({ displayName: clean.name }); } catch { /* non-fatal */ }
     // Verification is required before onboarding (server-enforced) — send it
     // immediately so the user can verify while they explore the dashboard.
-    try { await cred.user.sendEmailVerification(); } catch (e) { /* resend available */ }
+    // Both paths carry a continue URL back to THIS app so the verify link
+    // never dead-ends (the old raw SDK call had no continueUrl).
+    var continueUrl = (window.location.origin || '') + '/app';
+    try {
+      var tok = await cred.user.getIdToken();
+      await fetch(VERIFY_API, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ continueUrl: continueUrl }),
+      });
+    } catch {
+      try { await cred.user.sendEmailVerification({ url: continueUrl, handleCodeInApp: false }); } catch { /* resend available */ }
+    }
     writeSession(cred.user, clean.name, clean.phone);
     return { ok: true };
   } catch (err) {
@@ -220,14 +232,14 @@ async function sendPasswordReset(email) {
     });
     if (!res.ok) {
       var body = null;
-      try { body = await res.json(); } catch (e) { /* non-JSON */ }
+      try { body = await res.json(); } catch { /* non-JSON */ }
       if (body && body.error && body.error.code === 'RATE_LIMITED') {
         return { ok: false, error: 'Too many reset requests. Please wait a few minutes.' };
       }
       return { ok: false, error: 'If an account exists for that email, a reset link is on its way.' };
     }
     return { ok: true };
-  } catch (err) {
+  } catch {
     return { ok: false, error: 'If an account exists for that email, a reset link is on its way.' };
   }
 }
@@ -235,41 +247,48 @@ async function sendPasswordReset(email) {
 async function sendVerification() {
   var u = fbAuth.currentUser;
   if (!u) return { ok: false, error: 'No active session.' };
+  var continueUrl = (window.location.origin || '') + '/app';
   // Preferred: our backend (branded email + per-user rate limiting).
   try {
     var token = await u.getIdToken();
     var res = await fetch(VERIFY_API, {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: '{}',
+      body: JSON.stringify({ continueUrl: continueUrl }),
     });
     if (res.ok) return { ok: true };
-  } catch (e) { /* fall through to the SDK fallback */ }
+  } catch { /* fall through to the SDK fallback */ }
   try {
-    await u.sendEmailVerification();
+    await u.sendEmailVerification({ url: continueUrl, handleCodeInApp: false });
     return { ok: true };
-  } catch (err) {
+  } catch {
     return { ok: false, error: 'Could not send the verification email. Try again in a few minutes.' };
   }
 }
 
 async function signInWithGoogle() {
   try {
-    var cred = await fbAuth.signInWithPopup(new firebase.auth.GoogleAuthProvider());
-    writeSession(cred.user, cred.user.displayName || '', cred.user.phoneNumber || '');
-    return { ok: true };
+    // REDIRECT mode — popup mode hung after the OAuth dance on real browsers
+    // (user picked an account, clicked continue, then the page spun and dumped
+    // back to the login card). Redirect navigates to Google and back; the
+    // getRedirectResult handler below completes the sign-in on return.
+    await fbAuth.signInWithRedirect(new firebase.auth.GoogleAuthProvider());
+    return { ok: true, redirect: true };
   } catch (err) {
     var c = (err && err.code) || '';
-    if (c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request') {
+    if (c === 'auth/cancelled-popup-request' || c === 'auth/popup-closed-by-user') {
       return { ok: false, error: '' }; // user cancelled
+    }
+    if (c === 'auth/account-exists-with-different-credential' || c === 'auth/credential-already-in-use') {
+      return { ok: false, error: 'An account already exists with this email. Sign in with your email & password instead.' };
     }
     return { ok: false, error: friendly(err) };
   }
 }
 
 function signOut() {
-  try { fbAuth.signOut(); } catch (e) { /* already signed out */ }
-  try { localStorage.removeItem(AUTH_KEYS.session); } catch (e) { /* noop */ }
+  try { fbAuth.signOut(); } catch { /* already signed out */ }
+  try { localStorage.removeItem(AUTH_KEYS.session); } catch { /* noop */ }
 }
 
 /* ── Expose for the modal controller ──────────────────────────────────────── */
@@ -309,7 +328,7 @@ window.KatalogitAuth = {
     showError('');
   }
 
-  function field(label, type, id, placeholder, autocomplete, opts) {
+  function field(label, type, id, placeholder, autocomplete) {
     var wrap = document.createElement('div');
     wrap.className = 'auth-field';
     var lbl = document.createElement('label');
@@ -323,7 +342,9 @@ window.KatalogitAuth = {
     input.autocomplete = autocomplete;
     if (type === 'password') input.minLength = 8;
     input.maxLength = 120;
-    if (opts) input.setAttribute('pattern', opts);
+    // NOTE: no `pattern` attribute — the HTML pattern regex with `'` breaks
+    // under the modern v-flag parser (throws at validation) and blocks normal
+    // names like O'Brien's. All validation happens in register() below.
     wrap.append(lbl, input);
     return wrap;
   }
@@ -370,8 +391,9 @@ window.KatalogitAuth = {
       '</svg> Continue with Google';
     googleBtn.addEventListener('click', function () {
       googleBtn.disabled = true;
-      googleBtn.textContent = 'Checking…';
+      googleBtn.textContent = 'Redirecting to Google…';
       window.KatalogitAuth.signInWithGoogle().then(function (res) {
+        if (res.redirect) return; // page is navigating to Google
         if (res.ok) {
           showError('');
           window.location.href = '/app/';
@@ -412,9 +434,9 @@ window.KatalogitAuth = {
     form.noValidate = true;
 
     form.append(
-      field('Store Name', 'text', 'authSignupStore', 'Your store name', 'organization', '[A-Za-z0-9 .&\'()-]{2,60}'),
-      field('Your Name', 'text', 'authSignupName', 'Your full name', 'name', '[A-Za-z0-9 .&\'()-]{2,60}'),
-      field('Mobile Number', 'tel', 'authSignupPhone', '10-digit mobile', 'tel', '[0-9]{10}'),
+      field('Store Name', 'text', 'authSignupStore', 'Your store name', 'organization'),
+      field('Your Name', 'text', 'authSignupName', 'Your full name', 'name'),
+      field('Mobile Number', 'tel', 'authSignupPhone', '10-digit mobile', 'tel'),
       field('Email', 'email', 'authSignupEmail', 'you@store.com', 'email'),
       field('Password', 'password', 'authSignupPw', '8+ chars, letters & numbers', 'new-password')
     );
@@ -438,19 +460,23 @@ window.KatalogitAuth = {
       e.preventDefault();
       submit.disabled = true;
       submit.textContent = 'Creating…';
+      // Capture the values BEFORE the async call — re-querying the DOM after
+      // await can hit null if the view re-renders (this crashed the success
+      // screen and bounced users back to the login form).
+      var email = document.getElementById('authSignupEmail') ? document.getElementById('authSignupEmail').value : '';
       window.KatalogitAuth.register({
-        name: document.getElementById('authSignupName').value,
-        storeName: document.getElementById('authSignupStore').value,
-        phone: document.getElementById('authSignupPhone').value,
-        email: document.getElementById('authSignupEmail').value,
-        password: document.getElementById('authSignupPw').value,
+        name: document.getElementById('authSignupName') ? document.getElementById('authSignupName').value : '',
+        storeName: document.getElementById('authSignupStore') ? document.getElementById('authSignupStore').value : '',
+        phone: document.getElementById('authSignupPhone') ? document.getElementById('authSignupPhone').value : '',
+        email: email,
+        password: document.getElementById('authSignupPw') ? document.getElementById('authSignupPw').value : '',
       }).then(function (res) {
         if (res.ok) {
           showError('');
           // Account created + signed in. Show the verification step — the
           // dashboard requires a verified email (server-enforced).
           body.innerHTML = '';
-          body.appendChild(signUpSuccess(document.getElementById('authSignupEmail').value));
+          body.appendChild(signUpSuccess(email));
         } else {
           showError(res.error);
           submit.disabled = false;
@@ -593,6 +619,23 @@ window.KatalogitAuth = {
   closeBtn.addEventListener('click', close);
   modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+
+  // Complete a Google REDIRECT sign-in when the browser returns from
+  // accounts.google.com (redirect mode — see signInWithGoogle above). On an
+  // error (e.g. the email already has a password account) reopen the modal
+  // with the message so the user isn't left staring at a blank page.
+  fbAuth.getRedirectResult().then(function (cred) {
+    if (cred && cred.user) {
+      writeSession(cred.user, cred.user.displayName || '', cred.user.phoneNumber || '');
+      window.location.href = '/app/';
+    }
+  }).catch(function (err) {
+    var c = (err && err.code) || '';
+    if (c === 'auth/account-exists-with-different-credential' || c === 'auth/credential-already-in-use') {
+      open();
+      showError('An account already exists with this email. Sign in with your email & password instead.');
+    }
+  });
 })();
 
 console.log('🔐 KatalogitAI auth ready — Firebase protected.');

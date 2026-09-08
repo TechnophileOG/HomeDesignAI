@@ -13,7 +13,7 @@
 
 import { Router } from 'express';
 import { OAuth2Client } from 'google-auth-library';
-import { db, jobsColl, productsColl, storeRef, now, snap } from '../db.js';
+import { db, jobsColl, productsColl, now, snap } from '../db.js';
 import { jobCreate, id as cleanId } from '../validate.js';
 import { reserveCredits, refundCredits } from '../ledger.js';
 import { CREDIT_PRICING, JOB_QUOTA, WORKER_URL, WORKER_AUTH_TOKEN, TASKS_QUEUE,
@@ -189,10 +189,12 @@ async function verifyOidcToken(token) {
   // Don't re-verify the same token string in a burst.
   if (oidcVerification && oidcVerification.token === token) return oidcVerification.ok;
   let ok = false;
+  // Cloud Tasks sets audience = the exact URL in the task definition.
+  const workerUrl = WORKER_URL.endsWith('/api/v1/workers/run-job') ? WORKER_URL : `${WORKER_URL.replace(/\/$/, '')}/api/v1/workers/run-job`;
   try {
     const ticket = await oidcClient.verifyIdToken({
       idToken: token,
-      audience: WORKER_URL, // Cloud Tasks sets audience = the target URL
+      audience: workerUrl,
     });
     ok = !!ticket.getPayload();
   } catch { ok = false; }
@@ -333,7 +335,8 @@ async function invokeWorkerDirect(job) {
     console.warn('[jobs] WORKER_URL set but WORKER_AUTH_TOKEN missing — job left queued.');
     return;
   }
-  const res = await fetch(`${WORKER_URL}/workers/run-job`, {
+  const workerUrl = WORKER_URL.endsWith('/api/v1') ? `${WORKER_URL}/workers/run-job` : `${WORKER_URL}/api/v1/workers/run-job`;
+  const res = await fetch(workerUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -357,11 +360,11 @@ async function enqueueTask(job) {
     TASKS_QUEUE.split('/')[1],        // project
     TASKS_QUEUE.split('/')[3],        // location
     TASKS_QUEUE.split('/')[5],        // queue
-  );
-  const task = {
+  );    const workerUrl = WORKER_URL.endsWith('/api/v1/workers/run-job') ? WORKER_URL : `${WORKER_URL.replace(/\/$/, '')}/api/v1/workers/run-job`;
+    const task = {
     httpRequest: {
       httpMethod: 'POST',
-      url: WORKER_URL,
+      url: workerUrl,
       oidcToken: { serviceAccountEmail: process.env.RUNTIME_SA_EMAIL || '' },
       headers: { 'Content-Type': 'application/json' },
       body: Buffer.from(JSON.stringify({ jobId: job.id, storeId: job.storeId })).toString('base64'),

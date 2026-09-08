@@ -420,13 +420,14 @@ export const api = {
   },
 
   /* ── Password reset (rate-limited server-side — see the public route) ── */
-  async sendPasswordResetEmail(email) {
+  async sendPasswordResetEmail(email, continueUrl = '') {
     // Public endpoint: works without a session. The server rate-limits per
     // IP AND per email (3/hr IP, 2/hr email) and replies generically — no
-    // account enumeration, no way to spam reset emails.
+    // account enumeration, no way to spam reset emails. The continue URL
+    // (validated server-side) sends the user back to /app after resetting.
     await request('/public/auth/reset-email', {
       method: 'POST',
-      body: { email: sanitizeEmail(email) },
+      body: { email: sanitizeEmail(email), ...(continueUrl ? { continueUrl } : {}) },
       timeout: 15000,
     });
   },
@@ -714,9 +715,15 @@ export const api = {
     await request(`/admin/content/announcements/${sanitizeId(id)}`, { method: 'DELETE' });
   },
 
-  /* ── Account: branded verification email (rate-limited server-side) ──── */
-  async sendVerificationEmail() {
-    await request('/me/send-verification', { method: 'POST', timeout: 15000 });
+  /* ── Account: branded verification email (rate-limited server-side). The
+     continue URL (validated server-side) makes the verify link return the
+     user to /app — without it Firebase's bare handler dead-ends. ───────── */
+  async sendVerificationEmail(continueUrl = '') {
+    await request('/me/send-verification', {
+      method: 'POST',
+      body: continueUrl ? { continueUrl } : {},
+      timeout: 15000,
+    });
   },
 
   /* ── Geocoding (store location) — proxied + rate-limited server-side ── */

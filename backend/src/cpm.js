@@ -43,7 +43,7 @@ const ATTR_KEYS = ['fabric', 'fit', 'color', 'pattern', 'sleeve', 'neck', 'occas
 /* ── small safe helpers (local, not exported — validate.js stays the API boundary) ── */
 
 const clean = (v, max) => {
-  const t = String(v ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim();
+  const t = String(v ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim(); // eslint-disable-line no-control-regex
   if (t.length > max) fail('cpm field');
   return t;
 };

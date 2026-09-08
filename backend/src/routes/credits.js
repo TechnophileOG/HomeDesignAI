@@ -156,7 +156,6 @@ creditsRouter.post('/credits/subscriptions', orderLimiter, async (req, res, next
 
     // Store id is derived from the authenticated user — never from the body.
     const storeId = `store-${req.user.uid.slice(0, 8)}`;
-    const receipt = `kat-sub-${now().toString(36)}`;
 
     const basic = Buffer.from(`${RAZORPAY.keyId}:${RAZORPAY.keySecret}`).toString('base64');
     const rpRes = await fetch('https://api.razorpay.com/v1/subscriptions', {

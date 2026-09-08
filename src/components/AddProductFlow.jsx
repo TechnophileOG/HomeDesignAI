@@ -3,7 +3,7 @@ import QRCode from 'qrcode';
 import { X, Check, ArrowRight, QrCode, Sparkles, Camera, RotateCcw, ChevronLeft, RefreshCw, Coins, AlertTriangle, FileText, Clock } from 'lucide-react';
 import { lowBalanceThresholdCredits, api } from '../api/client';
 
-/* ── Real QR renderer (single-use join link for another phone) ─────────── */
+/* ── Real QR renderer (one join link, every phone scans the same code) ── */
 function QrCanvas({ value, size = 190 }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -235,7 +235,7 @@ function CameraViewfinder({ active, onCapture, photoData, side }) {
 /* ══════════════════════════════════════════════════════════════════════════════
    Main component
 ══════════════════════════════════════════════════════════════════════════════ */
-export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp, onShootComplete, onLowBalanceAlert, initialSessionId = null, onSessionClosed }) {
+export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp, onShootComplete, onLowBalanceAlert, initialSessionId = null }) {
   // "really low" balance — can only catalog ~1-2 products before running dry
   const lowBalance = walletBalance < lowBalanceThresholdCredits();
   // fire the admin follow-up alert only once per modal session
@@ -252,7 +252,6 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
   // ── REAL live session (QR multi-device) ────────────────────────────────
   const [sessionId, setSessionId]       = useState(null);  // backend session
   const [joinUrl, setJoinUrl]           = useState('');    // current QR link
-  const [joinToken, setJoinToken]       = useState('');
   const [sessionLive, setSessionLive]   = useState(null);  // polled status
   const [showQr, setShowQr]             = useState(false); // QR overlay (NEVER unmounts the camera)
   const [sessionError, setSessionError] = useState('');
@@ -284,7 +283,7 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
   }, []);
 
   /* ── Resume/join an EXISTING session (from the Review Center): jump into
-     bulk camera with that session and a fresh single-use QR. ───────────── */
+     bulk camera with that session and a fresh join QR. ──────────────────── */
   useEffect(() => {
     if (!initialSessionId) return;
     let alive = true;
@@ -324,11 +323,11 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
     setShowConsent(false);
     const pending = pendingFlushRef.current;
     pendingFlushRef.current = null;
-    if (pending) flushShots(pending.targets, { quiet: pending.quiet });
+    if (pending) flushShots(pending.targets, { quiet: pending.quiet, hold: pending.hold });
   };
 
   /* ── Start a REAL live session (registered server-side; each QR = one
-     single-use join link). On failure the session is skipped and capture
+     multi-use join link). On failure the session is skipped and capture
      still works locally — the user is told, nothing is lost. ──────────── */
   const startSession = async () => {
     setSessionBusy(true);
@@ -337,7 +336,6 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
       const res = await api.createSession('Bulk cataloging session');
       setSessionId(res.session.id);
       setJoinUrl(res.joinUrl);
-      setJoinToken(res.joinToken);
       setSessionLive({ id: res.session.id, status: 'active', devices: [], photoCount: 0, activity: [] });
     } catch (err) {
       console.error('[session] create failed:', err);
@@ -365,16 +363,15 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
     return () => { alive = false; clearInterval(t); };
   }, [sessionId, step]);
 
-  /* ── Mint a FRESH single-use QR (the previous one dies the moment it's
-     scanned or after 15 min — the owner taps this for each new phone). ── */
+  /* ── Mint a FRESH join QR (the same code works for every phone until it
+     expires after 15 min — refresh only if a late phone needs to join). ── */
   const refreshQr = async () => {
     if (!sessionId || sessionBusy) return;
     setSessionBusy(true);
     try {
       const res = await api.mintJoinUrl(sessionId);
       setJoinUrl(res.joinUrl);
-      setJoinToken(res.joinToken);
-    } catch (err) {
+    } catch {
       setSessionError('Could not create a fresh QR — tap again.');
     } finally { setSessionBusy(false); }
   };
@@ -442,28 +439,39 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
 
   /* ── Push photos to the cloud (server creates products + queues AI jobs,
      or saves drafts when credits are low). Confirmed items are marked saved;
-     anything that fails stays in the local cache — progress is never lost. ── */
-  const flushShots = async (items, { quiet = false } = {}) => {
+     anything that fails stays in the local cache — progress is never lost.
+     `quiet` (in-session auto-save) keeps the camera running and only shows a
+     sync note; non-quiet flushes move the flow to success/draft/error. ── */
+  const flushShots = async (items, { quiet = false, hold = false, explicit = false } = {}) => {
     const targets = (Array.isArray(items) ? items : [items]).filter((i) => i && i.front);
-    if (!targets.length || aiProcessing) return;
+    if (!targets.length) return;
+    // Block concurrent background (quiet) flushes only — never block the user's
+    // explicit "proceed" / "save all" click, even if a quiet auto-save is in flight.
+    if (!explicit && aiProcessing) return;
 
     // Fallback engine honesty gate: when our proprietary model is offline
     // and the user hasn't chosen yet, ASK first — never silently generate
     // with a third-party model, never silently hold either.
-    if (aiStatus?.fallbackActive && !consentChoiceRef.current) {
-      pendingFlushRef.current = { targets, quiet };
+    // Only gate quiet (auto-save) flushes; an explicit user action means they
+    // understand and want to proceed with whatever model is available.
+    if (!explicit && aiStatus?.fallbackActive && !consentChoiceRef.current) {
+      pendingFlushRef.current = { targets, quiet, hold };
       setShowConsent(true);
       return;
     }
 
-    setAiProcessing(true);
+    // Only show the AI overlay (and set aiProcessing) for explicit user actions;
+    // quiet auto-saves run transparently in the background without blocking the camera.
+    if (!quiet) setAiProcessing(true);
     setErrorState(null);
     setSyncNote('');
     try {
       const res = onShootComplete
-        ? await onShootComplete(targets, { hold: consentChoiceRef.current === 'hold' })
+        ? await onShootComplete(targets, {
+            hold: hold || consentChoiceRef.current === 'hold',
+            note: 'Live-session draft — review & generate from the Review Center.',
+          })
         : { status: 'error', saved: [], failed: targets, error: 'Upload service unavailable.' };
-      if (res.status === 'held') setStep('heldSaved');
       const savedFronts = new Set((res.saved || []).map((i) => i.front));
       const failed = (res.failed && res.failed.length ? res.failed : targets.filter((i) => !savedFronts.has(i.front)));
       const next = batchItemsRef.current.map((i) => (savedFronts.has(i.front) ? { ...i, saved: true } : i));
@@ -471,15 +479,28 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
       setBatchItems(next);
       persistBatch(next);
 
-      if (res.status === 'success') setStep('success');
+      if (quiet) {
+        // In-session auto-save: keep the camera live, report quietly. The
+        // step NEVER changes here — a quiet flush must not yank the user
+        // out of the shoot mid-session.
+        if (failed.length && failed.length === targets.length) {
+          setSyncNote(`${failed.length} product${failed.length !== 1 ? 's' : ''} waiting to upload — they'll be saved when you finish.`);
+        } else {
+          const n = targets.length - failed.length;
+          setSyncNote(`✓ ${n} product${n !== 1 ? 's' : ''} saved to drafts — review & generate later.`);
+        }
+        return;
+      }
+
+      if (res.status === 'held') setStep('heldSaved');
+      else if (res.status === 'success') setStep('success');
       else if (res.status === 'draft') setStep('draftSaved');
-      else if (quiet && failed.length === targets.length) {
-        setSyncNote(`${failed.length} photo${failed.length !== 1 ? 's' : ''} waiting to upload — they'll be saved when you finish.`);
-      } else {
+      else {
         setErrorState({
           items: failed.length ? failed : targets,
           message: res.error || 'Your photos could not be uploaded. They are safe on this device — tap Retry.',
         });
+        setStep('error'); // ← failures MUST surface the retry screen (was missing — users got stuck on the camera)
       }
     } catch (err) {
       console.error('[ai] flush failed:', err);
@@ -492,28 +513,39 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
         items: targets,
         message: err?.message || 'Your photos could not be uploaded. They are safe on this device — tap Retry.',
       });
+      if (!quiet) setStep('error');
     } finally {
-      setAiProcessing(false);
+      if (!quiet) setAiProcessing(false);
     }
   };
 
-  /* Auto-flush in-flight: every 5 newly captured photos go to the cloud as
-     drafts while the live session continues — nothing waits until the end. */
+  /* Auto-flush safety net: if any per-product saves failed (network blip),
+     retry the stragglers as drafts in batches — nothing waits until the end. */
   useEffect(() => {
     if (step !== 'batchCamera' || autoFlushBusyRef.current) return;
     const unsaved = batchItems.filter((i) => !i.saved);
     if (unsaved.length >= 5) {
       autoFlushBusyRef.current = true;
-      flushShots(unsaved.slice(0, 5), { quiet: true }).finally(() => { autoFlushBusyRef.current = false; });
+      flushShots(unsaved.slice(0, 5), { quiet: true, hold: !!sessionId }).finally(() => { autoFlushBusyRef.current = false; });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchItems, step]);
 
-  const commitBatchFront = () => {
-    if (!currentBatchFront) return;
-    const next = [...batchItemsRef.current, { front: currentBatchFront, back: null, saved: false }];
+  /* Commit one product (front-only or front+back) to the strip AND save it
+     to the cloud as a DRAFT immediately during a live session — one product
+     per save (never one photo at a time, so we don't spam the pipeline).
+     Progress is never lost: photos live in Review Center → Drafts and the
+     user generates the AI pass from there when ready. */
+  const commitProduct = (item) => {
+    const next = [...batchItemsRef.current, item];
     setBatchItems(next);
     persistBatch(next);
+    flushShots([item], { quiet: true, hold: !!sessionId });
+  };
+
+  const commitBatchFront = () => {
+    if (!currentBatchFront) return;
+    commitProduct({ front: currentBatchFront, back: null, saved: false });
     setCurrentBatchFront(null);
     setBatchSide('front');
   };
@@ -532,7 +564,7 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
       : batchItemsRef.current;
     const unsaved = all.filter((i) => !i.saved);
     if (!unsaved.length) { onClose(); return; }
-    flushShots(unsaved);
+    flushShots(unsaved, { explicit: true });
   };
 
   /* Retake/remove one captured item (from the strip lightbox). */
@@ -621,7 +653,7 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
           <p className="af-hint-text" style={{ textAlign:'center', fontWeight: 700 }}>
             Your photos are saved on this device — nothing is lost.
           </p>
-          <button className="af-cta" style={{ maxWidth: 280 }} onClick={() => flushShots(errorState.items)}>
+          <button className="af-cta" style={{ maxWidth: 280 }} onClick={() => flushShots(errorState.items, { explicit: true })}>
             <RefreshCw size={15}/> Retry upload
           </button>
           <button className="af-back-pill" style={{ alignSelf:'center' }} onClick={onClose}>
@@ -800,7 +832,7 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
 
               <button className="af-ctrl af-ctrl-confirm"
                       style={{ opacity: frontPhoto ? 1 : 0.3 }}
-                      onClick={() => frontPhoto && flushShots({ front: frontPhoto, back: backPhoto })}>
+                      onClick={() => frontPhoto && flushShots({ front: frontPhoto, back: backPhoto }, { explicit: true })}>
                 <ArrowRight size={20} color="#fff"/>
               </button>
             </div>
@@ -833,7 +865,7 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
               {sessionBusy ? 'Starting live session…' : 'Start Session →'}
             </button>
             <p className="af-hint-text" style={{ textAlign:'center', fontSize:'.68rem', opacity:.55, marginTop:-6 }}>
-              A secure live session is registered — each phone scans its own one-time QR.
+              A secure live session is registered — one QR joins every phone.
             </p>
           </div>
         )}
@@ -872,9 +904,7 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
               onCapture={dataUrl => {
                 if (batchSide === 'front') { setCurrentBatchFront(dataUrl); setBatchSide('back'); }
                 else {
-                  const next = [...batchItemsRef.current, { front: currentBatchFront, back: dataUrl, saved: false }];
-                  setBatchItems(next);
-                  persistBatch(next);
+                  commitProduct({ front: currentBatchFront, back: dataUrl, saved: false });
                   setCurrentBatchFront(null); setBatchSide('front');
                 }
               }}
@@ -971,7 +1001,8 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
             <button className="af-close" onClick={() => setShowQr(false)}><X size={18}/></button>
             <h3 className="af-big-title" style={{ fontSize:'1.1rem', marginTop:2 }}>Add another phone</h3>
             <p className="af-hint-text" style={{ textAlign:'center', marginTop:-8, fontSize:'.74rem' }}>
-              One-time QR — it works for the <strong>first scan only</strong> and expires in 15 minutes.
+              <strong>One QR for all your phones</strong> — every phone scans the
+              same code to join this session. It expires in 15 minutes; tap below for a fresh one.
             </p>
             <div className="af-qr-canvas">
               <QrCanvas value={joinUrl ? `${window.location.origin}${joinUrl}` : ''} />
@@ -991,7 +1022,7 @@ export default function AddProductFlow({ onClose, walletBalance = 0, onOpenTopUp
             <p className="af-sync-note" style={{ color:'#e8a04c', textAlign:'center' }}>{sessionError}</p>
             <div className="af-session-actions">
               <button className="af-cta" style={{ maxWidth: 260, padding:'9px 14px', fontSize:'.75rem' }} onClick={refreshQr} disabled={sessionBusy}>
-                <RefreshCw size={13}/> New QR for next phone
+                <RefreshCw size={13}/> Fresh QR (if expired)
               </button>
               <button className="af-back-pill" style={{ alignSelf:'center' }} onClick={pullSessionPhotos} disabled={sessionBusy}>
                 <Check size={14}/> Close session &amp; bring photos here

@@ -36,7 +36,7 @@ export const textEndpoint = ({
     and for re-injection into prompts (no raw user echo). */
 export const cleanText = (v, max) =>
   String(v ?? '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // eslint-disable-line no-control-regex
     // script/style blocks removed WHOLE (content included), then any tag
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1\s*>/gi, ' ')
     .replace(/<[^>]*>/g, ' ')

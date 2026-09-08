@@ -42,6 +42,20 @@ export default function AuthGate({ onAuthed, initialVerifyEmail = '' }) {
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
+  // Google sign-in runs in REDIRECT mode — when the browser returns from
+  // accounts.google.com, complete the sign-in here. (Popup mode hung after
+  // the OAuth dance on real browsers and dumped users back to the login card.)
+  useEffect(() => {
+    let mounted = true;
+    auth.completeGoogleRedirect().then((res) => {
+      if (!mounted || !res.handled) return;
+      if (res.ok) onAuthed(res.session); // Google accounts are pre-verified
+      else if (res.error) setError(res.error);
+    });
+    return () => { mounted = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Entered already signed-in but unverified (e.g. signed up on the website).
   useEffect(() => {
     if (initialVerifyEmail) startVerificationPoll();
@@ -104,6 +118,7 @@ export default function AuthGate({ onAuthed, initialVerifyEmail = '' }) {
     setBusy(true);
     setError('');
     const res = await auth.signInWithGoogle();
+    if (res.redirect) return; // page is navigating to Google — nothing else to do
     setBusy(false);
     if (res.ok) onAuthed(res.session); // Google accounts are pre-verified
     else if (res.error) setError(res.error);

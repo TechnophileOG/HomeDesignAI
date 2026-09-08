@@ -1,10 +1,11 @@
 /* ════════════════════════════════════════════════════════════════════════
    KatalogitAI — JoinSessionView (scanning phone, NO account needed)
    ────────────────────────────────────────────────────────────────────────
-   The QR code from the owner's live session points here. The single-use
-   join token in the URL is exchanged (once) for a per-DEVICE token, then
-   this page captures photos and uploads them to the session — the owner
-   sees every capture live in the session QR overlay.
+   The QR code from the owner's live session points here. The join token in
+   the URL is exchanged for a per-DEVICE token (the same QR joins every
+   phone until it expires), then this page captures photos and uploads them
+   to the session — the owner sees every capture live in the session QR
+   overlay.
    ════════════════════════════════════════════════════════════════════════ */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -76,7 +77,7 @@ export default function JoinSessionView({ sessionId, token, onReset }) {
   const [photo, setPhoto] = useState(null);
   const { videoRef, ready, denied, capture, flip } = useCamera();
 
-  // One-time join exchange — runs exactly once per mount.
+  // Join exchange — runs exactly once per mount (per-device token).
   useEffect(() => {
     let alive = true;
     (async () => {

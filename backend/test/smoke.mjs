@@ -44,7 +44,7 @@ if (token) {
 
 const { db } = await import('../src/db.js');
 const { grantCredits, reserveCredits, refundCredits, listLedger, getWallet } = await import('../src/ledger.js');
-const { insufficientCredits, AppError } = await import('../src/errors.js');
+const { AppError } = await import('../src/errors.js');
 
 const STORE = `smoke-${randomUUID().slice(0, 8)}`;
 const results = [];
@@ -157,7 +157,7 @@ try {
   assert.strictEqual(clean.phone, '+919876543210');
   pass('lead() sanitizes clean input');
   rejected = false;
-  try { lead({ name: 'x', phone: '123', email: 'nope' }); } catch (err) { rejected = true; }
+  try { lead({ name: 'x', phone: '123', email: 'nope' }); } catch { rejected = true; }
   assert.ok(rejected, 'lead() rejects junk input');
   pass('lead() rejects junk input');
 } catch (err) {

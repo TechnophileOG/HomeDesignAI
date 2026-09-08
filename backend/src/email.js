@@ -16,7 +16,7 @@
    short-lived; we never invent our own tokens.
    ════════════════════════════════════════════════════════════════════════ */
 
-import { FIREBASE_WEB_API_KEY, RESEND_API_KEY, EMAIL_FROM, APP_URL } from './config.js';
+import { FIREBASE_WEB_API_KEY, RESEND_API_KEY, EMAIL_FROM, APP_URL, CORS_ORIGIN } from './config.js';
 
 /* ── config ────────────────────────────────────────────────────────────── */
 
@@ -29,13 +29,34 @@ export const escapeHtml = (s) =>
 
 /* ── Identity Toolkit: mint a one-time code (never invent our own) ─────── */
 
+/** Validate a client-supplied continue URL: must be https (or localhost) and
+    its origin must be the app's own (APP_URL or a CORS-allowlisted origin).
+    Anything else is dropped — we never send a user to an attacker's domain. */
+export const safeContinueUrl = (raw) => {
+  try {
+    const u = new URL(String(raw || '').slice(0, 500));
+    const isLocalhost = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+    if (!isLocalhost && u.protocol !== 'https:') return '';
+    const allowed = new Set([
+      APP_URL && new URL(APP_URL).origin,
+      ...CORS_ORIGIN.map((o) => { try { return new URL(o).origin; } catch { return ''; } }),
+    ].filter(Boolean));
+    const origin = `${u.protocol}//${u.host}`;
+    if (!allowed.has(origin)) return '';
+    return u.toString().slice(0, 500);
+  } catch { return ''; }
+};
+
 /** Mint a one-time code via Firebase Identity Toolkit.
     Returns { oobCode, oobLink } or null on failure. */
-async function mintOob({ requestType, email, idToken }) {
+async function mintOob({ requestType, email, idToken, continueUrl }) {
   const body = { requestType, returnOobLink: true };
   if (email) body.email = email;
   if (idToken) body.idToken = idToken;
-  if (APP_URL) body.continueUrl = `${APP_URL}/app`;
+  // Prefer the validated client continue URL (it returns the user to the
+  // exact app instance they came from); fall back to APP_URL when set.
+  const cu = continueUrl || (APP_URL ? `${APP_URL}/app` : '');
+  if (cu) body.continueUrl = cu;
   const resp = await fetch(
     `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${encodeURIComponent(FIREBASE_WEB_API_KEY)}`,
     {
@@ -56,10 +77,12 @@ async function mintOob({ requestType, email, idToken }) {
 }
 
 /** Password-reset one-time code for a given account email. */
-export const mintPasswordResetCode = (email) => mintOob({ requestType: 'PASSWORD_RESET', email });
+export const mintPasswordResetCode = (email, continueUrl = '') =>
+  mintOob({ requestType: 'PASSWORD_RESET', email, continueUrl });
 
 /** Email-verification one-time code for the current user's ID token. */
-export const mintVerificationCode = (idToken) => mintOob({ requestType: 'VERIFY_EMAIL', idToken });
+export const mintVerificationCode = (idToken, continueUrl = '') =>
+  mintOob({ requestType: 'VERIFY_EMAIL', idToken, continueUrl });
 
 /* ── Resend: send an HTML email ────────────────────────────────────────── */
 
@@ -168,10 +191,10 @@ export const renderBranded = ({
 
 /** Send a branded password-reset email. Returns true if delivered via our
     provider, false if the caller should fall back to Firebase's email. */
-export async function sendPasswordResetBranded(email, toEmail = email) {
+export async function sendPasswordResetBranded(email, toEmail = email, continueUrl = '') {
   if (!emailConfigured()) return false;
   try {
-    const mint = await mintPasswordResetCode(email);
+    const mint = await mintPasswordResetCode(email, continueUrl);
     if (!mint) return false;
     const url = `${APP_URL}/app?mode=resetPassword&oobCode=${encodeURIComponent(mint.oobCode)}`;
     const html = renderBranded({
@@ -195,10 +218,10 @@ export async function sendPasswordResetBranded(email, toEmail = email) {
 
 /** Send a branded email-verification message. Returns true if delivered via
     our provider, false → caller falls back to Firebase's own email. */
-export async function sendVerificationBranded(toEmail, idToken) {
+export async function sendVerificationBranded(toEmail, idToken, continueUrl = '') {
   if (!emailConfigured()) return false;
   try {
-    const mint = await mintVerificationCode(idToken);
+    const mint = await mintVerificationCode(idToken, continueUrl);
     if (!mint) return false;
     const url = mint.oobLink || `${APP_URL}/app?mode=verifyEmail&oobCode=${encodeURIComponent(mint.oobCode)}`;
     const html = renderBranded({

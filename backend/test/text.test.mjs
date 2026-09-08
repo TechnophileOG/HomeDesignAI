@@ -54,7 +54,7 @@ try {
   // the hostile title's brackets/parens must be stripped from the seed line
   // (our own template may legitimately use parens in its instructions)
   const garmentLine = prompt.split('\n').find((l) => l.startsWith('Garment:'));
-  assert.ok(garmentLine && !/[)\]\}{]/.test(garmentLine), 'hostile title brackets stripped');
+  assert.ok(garmentLine && !/[)\]}{]/.test(garmentLine), 'hostile title brackets stripped');
   assert.ok(!prompt.includes('ignore previous instructions'), 'injection phrase not echoed');
   assert.ok(!/\bignore\b|\binstructions?\b/i.test(prompt), 'instruction words not echoed');
   assert.ok(prompt.includes('Indian e-commerce'), 'brand voice present');

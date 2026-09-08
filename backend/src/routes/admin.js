@@ -21,7 +21,7 @@ import { Router } from 'express';
 import { OWNER_EMAIL, ADMIN_PASSCODE } from '../config.js';
 import { verifyAdminPasscode, issueAdminSession } from '../auth.js';
 import { userLimiter } from '../rate-limit.js';
-import { badRequest, forbidden, notConfigured } from '../errors.js';
+import { forbidden, notConfigured } from '../errors.js';
 import { auditWrite } from '../audit.js';
 
 export const adminRouter = Router();

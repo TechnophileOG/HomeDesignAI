@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import {
-  db, now, storeRef, storesColl, productsColl, notifsColl, adminAlertsColl, usersRef, snap,
+  db, now, storeRef, productsColl, notifsColl, adminAlertsColl, usersRef, snap,
 } from '../db.js';
 import { store as sanitizeStore, product as sanitizeProduct, productPatch,
          fileName, oneOf, id as cleanId, notification as sanitizeNotif,
@@ -192,7 +192,6 @@ coreRouter.post('/stores/:storeId/products', requireStoreOwner, async (req, res,
     const CREATE_STATUS = ['pending_approve', 'draft'];
     const productId = clean.id || `p-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
     const doc = {
-      id: productId,
       storeId: req.store.id,
       status: CREATE_STATUS.includes(clean.status) ? clean.status : 'pending_approve',
       createdAt: now(),

@@ -98,7 +98,7 @@ export async function verifyIdToken(token) {
       }
       throw err;
     }
-  } catch (err) {
+  } catch {
     throw unauthorized();
   }
 }

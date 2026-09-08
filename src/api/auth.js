@@ -18,13 +18,15 @@
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   sendEmailVerification,
   reload as fbReload,
   signOut as fbSignOut,
   updateProfile,
   getIdToken,
+  applyActionCode,
 } from 'firebase/auth';
 import { fbAuth } from './firebase';
 import { api, setTokenGetter } from './client';
@@ -48,11 +50,38 @@ const friendly = (err) => {
   if (c === 'auth/too-many-requests') return 'Too many attempts. Try again in a few minutes.';
   if (c === 'auth/network-request-failed') return 'Network error — check your connection and try again.';
   if (c === 'auth/configuration-not-found') return 'Sign-in is temporarily unavailable. Please try again in a few minutes.';
-  if (c === 'auth/operation-not-allowed') return 'Email/password sign-in is not enabled yet. Contact support.';
+  if (c === 'auth/operation-not-allowed') return 'This sign-in method is not enabled on the project yet.';
   if (c === 'auth/unauthorized-domain') return 'This domain is not authorized for sign-in. Contact support.';
   if (c === 'auth/api-key-not-valid') return 'Authentication is misconfigured. Contact support.';
+  if (c === 'auth/popup-blocked' || c === 'auth/popup-blocked-by-browser' || c === 'auth/operation-not-supported-in-this-environment') {
+    return 'The sign-in popup was blocked. Allow popups for this site and try again.';
+  }
+  if (c === 'auth/account-exists-with-different-credential' || c === 'auth/credential-already-in-use') {
+    return 'An account already exists with this email. Sign in with your email & password instead.';
+  }
+  if (c === 'auth/expired-action-code') return 'This link has expired. Request a fresh one below.';
+  if (c === 'auth/invalid-action-code') return 'This link is no longer valid. Request a fresh one below.';
   if (c === 'auth/internal-error') return 'Sign-in failed. Please try again in a moment.';
   return 'Something went wrong. Please try again.';
+};
+
+/** The app's own origin + /app — so verification/reset links always return
+    the user to THIS app instance (localhost in dev, the domain in prod). */
+const verifyContinueUrl = () => {
+  try {
+    const origin = window.location.origin || '';
+    return origin.startsWith('http') ? `${origin}/app` : '';
+  } catch { return ''; }
+};
+
+/** actionCodeSettings for the SDK fallback — WITHOUT this, Firebase's
+    default handler has no continue URL and can't send the user back to the
+    app after they click the link (the root cause of "link opens but nothing
+    happens"). handleCodeInApp:false → Firebase consumes the code on its
+    hosted page, verifies the email, then redirects to our /app. */
+const sdkVerifySettings = () => {
+  const url = verifyContinueUrl();
+  return url ? { url, handleCodeInApp: false } : undefined;
 };
 
 const toSession = async (user) => {
@@ -95,21 +124,40 @@ export const auth = {
     }
   },
 
-  /** Sign in with Google (popup). Provider must be enabled in the Firebase
-      console (it is — you enabled it). First-timers get an account created. */
+  /** Sign in with Google — REDIRECT mode (not popup). Popup failed on real
+      browsers: the OAuth dance completed (user picked an account, clicked
+      continue) but the popup→parent handoff hung for a long time and then
+      bounced the user back to the login card. Redirect navigates the whole
+      page to Google and back — no popup, no hidden iframe, works in every
+      browser/webview, and is the flow Firebase recommends on mobile.
+      The result is picked up on return by completeGoogleRedirect(). */
   async signInWithGoogle() {
+    const provider = new GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
     try {
-      const provider = new GoogleAuthProvider();
-      const cred = await signInWithPopup(fbAuth, provider);
-      const session = await toSession(cred.user);
-      await api.saveSession(session);
-      return { ok: true, session };
+      await signInWithRedirect(fbAuth, provider);
+      return { ok: true, redirect: true }; // page is navigating away
     } catch (err) {
       const c = err?.code || '';
-      if (c === 'auth/popup-closed-by-user' || c === 'auth/cancelled-popup-request') {
+      if (c === 'auth/cancelled-popup-request' || c === 'auth/popup-closed-by-user') {
         return { ok: false, error: '' }; // user cancelled — not an error worth showing
       }
       return { ok: false, error: friendly(err) };
+    }
+  },
+
+  /** Pick up a Google redirect result — called on the sign-in screen's mount
+      after the browser returns from accounts.google.com. Returns
+      { handled:false } when there was no pending redirect to complete. */
+  async completeGoogleRedirect() {
+    try {
+      const cred = await getRedirectResult(fbAuth);
+      if (!cred || !cred.user) return { ok: false, handled: false };
+      const session = await toSession(cred.user);
+      await api.saveSession(session);
+      return { ok: true, handled: true, session };
+    } catch (err) {
+      return { ok: false, handled: true, error: friendly(err) };
     }
   },
 
@@ -127,9 +175,12 @@ export const auth = {
       const cred = await createUserWithEmailAndPassword(fbAuth, cleanEmail, pw);
       try { await updateProfile(cred.user, { displayName: cleanName }); } catch { /* non-fatal */ }
       // Send the verification email right away — through OUR backend (branded
-      // + rate-limited); falls back to the Firebase SDK if the route is down.
-      try { await api.sendVerificationEmail(); }
-      catch { try { await sendEmailVerification(cred.user); } catch { /* resend available */ } }
+      // + rate-limited) when it can honor the continue URL; otherwise the SDK
+      // path with explicit actionCodeSettings (both carry a link back to the
+      // app — the missing piece that made verification links dead-end).
+      const continueUrl = verifyContinueUrl();
+      try { await api.sendVerificationEmail(continueUrl); }
+      catch { try { await sendEmailVerification(cred.user, sdkVerifySettings()); } catch { /* resend available */ } }
       const session = await toSession(cred.user);
       session.name = cleanName;
       await api.saveSession(session);
@@ -145,15 +196,16 @@ export const auth = {
   async sendVerification() {
     const u = fbAuth.currentUser;
     if (!u) return { ok: false, error: 'No active session.' };
+    const continueUrl = verifyContinueUrl();
     try {
-      await api.sendVerificationEmail();
+      await api.sendVerificationEmail(continueUrl);
       return { ok: true };
     } catch (err) {
       if (err?.code === 'RATE_LIMITED') {
         return { ok: false, error: 'Too many requests. Try again in an hour.' };
       }
       try {
-        await sendEmailVerification(u);
+        await sendEmailVerification(u, sdkVerifySettings());
         return { ok: true };
       } catch (err2) {
         const c = err2?.code || '';
@@ -162,6 +214,19 @@ export const auth = {
         }
         return { ok: false, error: friendly(err2) };
       }
+    }
+  },
+
+  /** Consume an in-app verification link (mode=verifyEmail&oobCode=… — only
+      reached when the code came to the app directly; the hosted handler
+      consumes the standard flow), then reload + force-refresh the token. */
+  async applyVerifyCode(oobCode) {
+    try {
+      if (oobCode) await applyActionCode(fbAuth, oobCode);
+      const res = await this.refreshVerified();
+      return res;
+    } catch (err) {
+      return { ok: false, verified: !!fbAuth.currentUser?.emailVerified, error: friendly(err) };
     }
   },
 
